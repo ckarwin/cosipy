@@ -125,7 +125,7 @@ class ContinuumEstimationNN(BinnedBackgroundInterface):
         if torch.cuda.is_available():
             
             gpu_count = torch.cuda.device_count()
-            logger.info(f"[INFO] GPUs available: {gpu_count}")
+            logger.info(f"GPUs available: {gpu_count}")
             capability = torch.cuda.get_device_capability(0)
             major, minor = capability
             
@@ -133,17 +133,17 @@ class ContinuumEstimationNN(BinnedBackgroundInterface):
             if major < 3 or (major == 3 and minor < 7):
                 logger.info(f"[WARNING] GPU {torch.cuda.get_device_name(0)} "
                   f"(capability {major}.{minor}) is not supported by this PyTorch build.")
-                logger.info("[INFO] Falling back to CPU.")
+                logger.info("Falling back to CPU.")
                 return torch.device('cpu')
             
             else:
-                logger.info(f"[INFO] Using GPU 0: {torch.cuda.get_device_name(0)} (capability {major}.{minor})")
+                logger.info(f"Using GPU 0: {torch.cuda.get_device_name(0)} (capability {major}.{minor})")
                 if gpu_count > 1:
-                    logger.info("[INFO] Multi-GPU training not enabled; using a single GPU.")
+                    logger.info("Multi-GPU training not enabled; using a single GPU.")
                 return torch.device('cuda')
         
         else:
-            logger.info("[INFO] No GPU detected. Using CPU.")
+            logger.info("No GPU detected. Using CPU.")
             return torch.device('cpu')
 
     @staticmethod
@@ -211,6 +211,8 @@ class ContinuumEstimationNN(BinnedBackgroundInterface):
 
         Returns
         -------
+        projected : histogram
+            Histogram object projected onto Em, Phi, and PsiChi.
         data : array
             Contents of histogram object given as an array. 
         """
@@ -219,7 +221,7 @@ class ContinuumEstimationNN(BinnedBackgroundInterface):
         projected = hist.project(['Em', 'Phi', 'PsiChi'])
         data = projected.contents.todense()
         
-        return data
+        return projected, data
 
     @staticmethod
     def mask_from_cumdist_vectorized(psr_map, containment=0.4):
@@ -281,7 +283,10 @@ class ContinuumEstimationNN(BinnedBackgroundInterface):
                   epochs=800, lr=1e-3,
                   self_mask_fraction=0.1,
                   lambda_sup=0.5, lambda_self=0.5,
-                  model_type="gcn"):
+                  model_type="gcn",
+                  nn_model="new",
+                  nn_model_file=None,
+                  nn_model_savename="inpainting_nn_model"):
 
         """Training function for inpainting.
         
@@ -317,7 +322,15 @@ class ContinuumEstimationNN(BinnedBackgroundInterface):
             hybride mode. Default is 0.5.
         model_type : str, optional 
             Which model to use. Options are gcn (default) or unet.
-        
+        nn_model : str, optional
+            Train new model or load existing model. Options are 
+            new (default), load (loads model weights), and 
+            load_full (loads model weights, optimizer state, and epochs). 
+        nn_model_file : str, optional
+            Name of NN model to load. Default is None.
+        nn_model_savename : str, optional
+            Prefix of saved NN model. Default is inpainting_nn_model.  
+
         Returns
         -------
         inpainted : array
@@ -329,22 +342,45 @@ class ContinuumEstimationNN(BinnedBackgroundInterface):
 
         npix = hp.nside2npix(nside)
         edge_index = self.build_healpix_graph(nside).to(self.device)
-    
-        if model_type == "unet":
-            model = PyGGraphUNet(in_channels=1, hidden_channels=32, out_channels=1, depth=3).to(self.device)
-            logger.info("[INFO] Using GraphUNet model.")
-        else:
-            model = GCN(in_channels=1, hidden_channels=32).to(self.device)
-            logger.info("[INFO] Using GCN model.")
+   
+        # Either start new NN model or load existing model:
+        if nn_model == "new":
+            if model_type == "unet":
+                model = PyGGraphUNet(in_channels=1, hidden_channels=32, out_channels=1, depth=3).to(self.device)
+                logger.info("Using GraphUNet model.")
+            else:
+                model = GCN(in_channels=1, hidden_channels=32).to(self.device)
+                logger.info("Using GCN model.")
 
-        optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+            optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+        
+        if nn_model != "new" and nn_model_file == None:
+            raise ValueError("Must specify nn_model_file if loading NN model.")
+
+        if nn_model == "load":
+            model = self.load_NN_Model(nn_model_file, full_state=False)
+            optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+            logger.info(f"Loaded NN model (weights only) from {nn_model_file}")
+
+        if nn_model == "load_full":
+            model, optimizer, start_epoch, final_loss = self.load_NN_Model(nn_model_file, full_state=True)
+            logger.info(f"Loaded full NN model from {nn_model_file}")
+
         loss_fn = nn.MSELoss()
 
         inpainted = np.zeros_like(input_data_map)
         n_energy, n_phi, _ = input_data_map.shape
 
+        # training loss:
+        training_loss = np.zeros([n_energy,n_phi,epochs])
+
+        # Loss weights should only be applied in hybrid mode:
+        if mode != 'hybrid':
+                lambda_sup = 1
+                lambda_self = 1
+
         for e in range(n_energy):
-            for p in range(n_phi):
+            for p in range(n_phi):     
                 y = input_data_map[e, p].reshape(-1)
                 mask = mask_map[e, p].reshape(-1)
 
@@ -388,6 +424,9 @@ class ContinuumEstimationNN(BinnedBackgroundInterface):
                                         y_tensor * (1 - mask_self_tensor))
                         loss_total += lambda_self * self_loss
 
+                    # Save training loss:
+                    training_loss[e,p,epoch] = loss_total
+
                     loss_total.backward()
                     optimizer.step()
 
@@ -397,8 +436,71 @@ class ContinuumEstimationNN(BinnedBackgroundInterface):
                 # Combine prediction with unmasked data
                 pred_np = pred.detach().cpu().numpy().reshape(npix)
                 inpainted[e, p] = y * mask + pred_np * (1 - mask)
+    
+        # write training loss array to file:
+        np.save("training_loss",training_loss)
+
+        # Save NN model:
+        torch.save({
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'epoch': epoch,
+        'loss': loss_total}, f"{nn_model_savename}.pth")
 
         return inpainted
+
+    def load_NN_Model(self, nn_model_file, full_state=True):
+
+        """Loads NN model saved from torch.save.
+        
+        Parameters
+        ----------
+        nn_model_file : str
+            NN model file (.pth) from torch.save.
+        full_state : bool, optional
+            Option to load full state, which includes model weights, 
+            optimizer state, and epochs. Default is False, in which 
+            case only the model weights are loaded. 
+        
+        Returns
+        -------
+        model : dict
+            State dictionary with NN model weights
+        optimizer : torch.optim.Adam
+            Optimizer and state. Only for full_state=True.
+        start_epoch : int
+            Epoch number. Only for full_state=True.
+        final_loss : float
+            Training loss. Only for full_state=True.
+        """
+
+        logger.info("loading NN model...")
+
+        if not self.device:
+            # Initiate device, either CPU or GPU if available.
+            self.device = self.select_device()
+
+        checkpoint = torch.load(nn_model_file, map_location=torch.device(self.device))
+
+        # Need to recreate the model architecture first
+        # (same layer definitions, etc.) before loading weights.
+        # For now we just use the GCN:
+        model = GCN(in_channels=1, hidden_channels=32).to(self.device)
+
+        # Load the model weights:
+        model.load_state_dict(checkpoint['model_state_dict'])
+
+        # Option to load the optimizer state and epochs:
+        if full_state == True:
+            optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            start_epoch = checkpoint['epoch'] + 1
+            final_loss = checkpoint['loss']
+
+            return model, optimizer, start_epoch, final_loss
+
+        else:
+            return model
 
     @staticmethod
     def save_inpainted_histpy(projected_hist, inpainted_maps, output_file="inpainted.h5"):
@@ -578,7 +680,8 @@ class ContinuumEstimationNN(BinnedBackgroundInterface):
         return
 
     @staticmethod
-    def visualize_and_save(input_data_map, mask_map, inpainted_maps, em_bin=2, phi_bin=4, prefix="inpainted"):
+    def visualize_and_save(input_data_map, mask_map, inpainted_maps, 
+            em_bin=2, phi_bin=4, prefix="inpainted", show_plots=False):
         
         """
         Show and save Mollweide projections of true, masked, and inpainted maps.
@@ -599,27 +702,75 @@ class ContinuumEstimationNN(BinnedBackgroundInterface):
             Which phi bin to use (default is 0). 
         prefix : str
             Prefix of saved files.
+        show_plots : bool, optional
+            Option to show plots. Default is False.
         """
         
         maps = [
-            (input_data_map[em_bin, phi_bin], f"{prefix}_true_E{em_bin}_Phi{phi_bin}.pdf", "Input Map"),
-            (input_data_map[em_bin, phi_bin] * mask_map[em_bin, phi_bin], f"{prefix}_masked_E{em_bin}_Phi{phi_bin}.pdf", "Masked Map"),
-            (inpainted_maps[em_bin, phi_bin], f"{prefix}_inpainted_E{em_bin}_Phi{phi_bin}.pdf", "Inpainted Map")
-    ]
+            (input_data_map[em_bin, phi_bin], f"{prefix}_true_E{em_bin}_Phi{phi_bin}.pdf", 
+                f"Input Map (Em={em_bin}, Phi={phi_bin})"),
+            (input_data_map[em_bin, phi_bin] * mask_map[em_bin, phi_bin], 
+                f"{prefix}_masked_E{em_bin}_Phi{phi_bin}.pdf", f"Masked Map (Em={em_bin}, Phi={phi_bin})"),
+            (inpainted_maps[em_bin, phi_bin], f"{prefix}_inpainted_E{em_bin}_Phi{phi_bin}.pdf", 
+                f"Inpainted Map (Em={em_bin}, Phi={phi_bin})")]
 
         for data, filename, title in maps:
             hp.mollview(data, title=title)
             plt.savefig(filename)
+            if show_plots == True:
+                plt.show()
             plt.close()
             logger.info(f"Saved visualization: {filename}")
 
         return
 
+    def plot_training_loss(self,input_file, energy_bin, save_prefix, show_plot=True):
+
+        """Plot training loss as a function of Phi and number of epochs
+        for a given energy bin.
+        
+        Parameters
+        ----------
+        input_file : str
+            File name for input training loss array.
+        energy_bin : int
+            Energy bin to plot.
+        save_prefix : str
+            Prefix of saved image file.
+        show_plot : bool, optional
+            Whether to show plot (default is True).
+        """
+
+        # Load loss data
+        loss_data = np.load(input_file)  # shape: (Energy, Phi, Epochs)
+
+        loss_slice = loss_data[energy_bin]  # shape: (Phi, Epochs)
+
+        # Transpose to shape (Epochs, Phi) for plotting
+        loss_slice = loss_slice.T
+
+        # Create the plot
+        plt.figure(figsize=(8, 5))
+        plt.imshow(loss_slice, aspect='auto', origin='lower', cmap='viridis',
+           extent=[0, loss_slice.shape[1], 0, loss_slice.shape[0]],vmax=50000)
+
+        plt.colorbar(label='Loss')
+        plt.xlabel('Phi bin')
+        plt.ylabel('Epoch')
+        plt.title(f"Training Loss Map (Energy bin {energy_bin})")
+        plt.tight_layout()
+        plt.savefig(f"{save_prefix}.png", dpi=150)
+        if show_plot:
+            plt.show()
+    
+        return
+
     def estimate_bg(self, input_data, psr_file, background_model=None, 
             training_mode="self", containment=0.6, epochs=800, model_type="gcn",
+            nn_model="new", nn_model_file=None, nn_model_savename="inpainting_nn_model",
             lr=1e-3, self_mask_fraction=0.1, lambda_sup=0.5, lambda_self=0.5,  
             prefix="inpainted", visualize=False, em_bin=2, phi_bin=4, 
-            evaluate_only=False, true_file=None, inpainted_file=None,
+            evaluate_only=False, inpainted_file=None,
             evaluate=False, show_plots=False):
 
         """Convenience function for estimating the background. 
@@ -645,6 +796,14 @@ class ContinuumEstimationNN(BinnedBackgroundInterface):
             Number of training epochs. Default is 800.
         model_type : str, optional
             Type of NN to use. Options are gcn or unet. Default is gcn.
+        nn_model : str, optional
+            Train new model or load existing model. Options are 
+            new (default), load (loads model weights), and 
+            load_full (loads model weights, optimizer state, and epochs). 
+        nn_model_file : str, optional
+            Name of NN model to load. Default is None.
+        nn_model_savename : str, optional
+            Prefix of saved NN model. Default is inpainting_nn_model. 
         lr : float, optional
             Learning rate. Default is 1e-3. 
         self_mask_fraction : float, optional
@@ -665,9 +824,7 @@ class ContinuumEstimationNN(BinnedBackgroundInterface):
             Phi bin index for visualization. Default is 4. 
         evaluate_only : boolean, optional
             Skip training and evaluate two histograms. Requires 
-            true file and inpainted file. 
-        true_file : hist, optional
-            True histogram file (for evaluate-only). Default is None. 
+            background_model file and inpainted_file. 
         inpainted_file : hist, optional
             Inpainted histogram file (for evaluate-only). Default is None.
         evaluate : boolean
@@ -681,19 +838,22 @@ class ContinuumEstimationNN(BinnedBackgroundInterface):
 
         # --- Evaluation-only mode ---
         if evaluate_only == True:
-            if not true_file or not inpainted_file:
-                raise ValueError("--evaluate-only requires --true-file and --inpainted-file")
-            true_hist = Histogram.open(true_file)
+            if not background_model or not inpainted_file:
+                raise ValueError("--evaluate-only requires --background_model and --inpainted-file")
+            true_hist = Histogram.open(background_model)
             inpainted_hist = Histogram.open(inpainted_file)
             self.evaluate_inpainting_accuracy(true_hist, 
                     inpainted_hist, prefix=prefix, show_plots=show_plots)
         
             return
 
-        # --- Training + optional inline evaluation ---
-        if training_mode == "hybrid" and background_model is None:
-            logger.info("[INFO] Hybrid mode selected but no background model provided.")
-            logger.info("[INFO] Falling back to self-supervised loss only.")
+        # Check that training mode has needed input model:
+        if training_mode in ["hybrid","supervised"] and background_model is None:
+            raise ValueError("Hybrid and supervised modes require --background_model")
+
+        # For in-line evaluation, check that model is passed:
+        if evaluate and background_model is None:
+            raise ValueError("--evaluate requires --background_model")
 
         # Load data
         input_data_proj, input_data_map = self.load_projected_data(input_data)
@@ -702,7 +862,7 @@ class ContinuumEstimationNN(BinnedBackgroundInterface):
         # Optional background model
         model_map = None
         if background_model:
-            model_map = self.load_projected_model(background_model)
+            model_proj, model_map = self.load_projected_model(background_model)
 
         # Derive nside
         npix = input_data_map.shape[-1]
@@ -714,6 +874,7 @@ class ContinuumEstimationNN(BinnedBackgroundInterface):
         # Train & inpaint
         self.inpainted_maps = self.train_inpaint(input_data_map, mask_map, nside, 
             mode=training_mode, model_map=model_map,
+            nn_model=nn_model, nn_model_file=nn_model_file, nn_model_savename=nn_model_savename,
             epochs=epochs, model_type=model_type,
             lr=lr, self_mask_fraction=self_mask_fraction, 
             lambda_sup=lambda_sup, lambda_self=lambda_self)
@@ -724,12 +885,12 @@ class ContinuumEstimationNN(BinnedBackgroundInterface):
         # Visualization
         if visualize:
             self.visualize_and_save(input_data_map, mask_map, self.inpainted_maps,
-                           em_bin=em_bin, phi_bin=phi_bin, prefix=prefix)
+                           em_bin=em_bin, phi_bin=phi_bin, prefix=prefix, show_plots=show_plots)
 
         # Inline evaluation
         if evaluate:
             inpainted_hist = Histogram(input_data_proj.axes, contents=self.inpainted_maps, sparse=True)
-            self.evaluate_inpainting_accuracy(input_data_proj, inpainted_hist, prefix=prefix, show_plots=show_plots)
+            self.evaluate_inpainting_accuracy(model_proj, inpainted_hist, prefix=prefix, show_plots=show_plots)
 
         end_time = time.time()
         logger.info(f"Total time elapsed: {end_time - start_time:.2f} seconds")
