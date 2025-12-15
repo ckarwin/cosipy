@@ -14,6 +14,7 @@ from astropy import units as u
 from mhealpy import HealpixMap, HealpixBase
 import time
 import logging
+from tqdm.auto import tqdm
 logger = logging.getLogger(__name__)
 
 # PyTorch and torch_geometric imports:
@@ -280,13 +281,14 @@ class ContinuumEstimationNN(BinnedBackgroundInterface):
 
     def train_inpaint(self, input_data_map, mask_map, nside,
                   mode='self', model_map=None,
-                  epochs=800, lr=1e-3,
+                  epochs=200, lr=1e-3,
                   self_mask_fraction=0.1,
                   lambda_sup=0.5, lambda_self=0.5,
                   model_type="gcn",
                   nn_model="new",
                   nn_model_file=None,
-                  nn_model_savename="inpainting_nn_model"):
+                  nn_model_savename="inpainting_nn_model",
+                  verbose=True):
 
         """Training function for inpainting.
         
@@ -330,6 +332,9 @@ class ContinuumEstimationNN(BinnedBackgroundInterface):
             Name of NN model to load. Default is None.
         nn_model_savename : str, optional
             Prefix of saved NN model. Default is inpainting_nn_model.  
+        verbose : bool, optional
+            Gives logger info for validation loss every 50 epochs.
+            Default is False.
 
         Returns
         -------
@@ -379,66 +384,75 @@ class ContinuumEstimationNN(BinnedBackgroundInterface):
                 lambda_sup = 1
                 lambda_self = 1
 
-        for e in range(n_energy):
-            for p in range(n_phi):     
-                y = input_data_map[e, p].reshape(-1)
-                mask = mask_map[e, p].reshape(-1)
+        # Progress bar:
+        total_steps = n_energy * n_phi
+        with tqdm(total=total_steps, desc="Inpainting (Em, Phi)", unit="map") as pbar:
+        
+            for e in range(n_energy):
+                for p in range(n_phi):     
 
-                # Masked input
-                x = (y * mask).reshape(-1, 1)
+                    # advance progress bar:
+                    pbar.update(1)
 
-                # Convert to tensors
-                data = Data(x=torch.tensor(x, dtype=torch.float32).to(self.device),
+                    y = input_data_map[e, p].reshape(-1)
+                    mask = mask_map[e, p].reshape(-1)
+
+                    # Masked input
+                    x = (y * mask).reshape(-1, 1)
+
+                    # Convert to tensors
+                    data = Data(x=torch.tensor(x, dtype=torch.float32).to(self.device),
                         edge_index=edge_index)
-                y_tensor = torch.tensor(y, dtype=torch.float32).to(self.device)
-                mask_tensor = torch.tensor(mask, dtype=torch.float32).to(self.device)
+                    y_tensor = torch.tensor(y, dtype=torch.float32).to(self.device)
+                    mask_tensor = torch.tensor(mask, dtype=torch.float32).to(self.device)
 
-                target_model = None
-                if model_map is not None:
-                    target_model = torch.tensor(model_map[e, p], dtype=torch.float32).to(self.device).reshape(-1)
+                    target_model = None
+                    if model_map is not None:
+                        target_model = torch.tensor(model_map[e, p], dtype=torch.float32).to(self.device).reshape(-1)
 
-                # Training loop
-                for epoch in range(epochs):
-                    optimizer.zero_grad()
-                    pred = model(data.x, data.edge_index).squeeze()
+                    # Training loop
+                    for epoch in range(epochs):
+                        optimizer.zero_grad()
+                        pred = model(data.x, data.edge_index).squeeze()
 
-                    loss_total = 0.0
+                        loss_total = 0.0
 
-                    # Supervised component
-                    if mode in ['supervised', 'hybrid'] and target_model is not None:
-                        sup_loss = loss_fn(pred * (1 - mask_tensor),
+                        # Supervised component
+                        if mode in ['supervised', 'hybrid'] and target_model is not None:
+                            sup_loss = loss_fn(pred * (1 - mask_tensor),
                                        target_model * (1 - mask_tensor))
-                        loss_total += lambda_sup * sup_loss
+                            loss_total += lambda_sup * sup_loss
 
-                    # Self-supervised component
-                    if mode in ['self', 'hybrid']:
-                        unmasked_idx = np.where(mask == 1)[0]
-                        num_rand = max(1, int(len(unmasked_idx) * self_mask_fraction))
-                        rand_mask_idx = np.random.choice(unmasked_idx, num_rand, replace=False)
+                        # Self-supervised component
+                        if mode in ['self', 'hybrid']:
+                            unmasked_idx = np.where(mask == 1)[0]
+                            num_rand = max(1, int(len(unmasked_idx) * self_mask_fraction))
+                            rand_mask_idx = np.random.choice(unmasked_idx, num_rand, replace=False)
 
-                        mask_self = mask.copy()
-                        mask_self[rand_mask_idx] = 0
-                        mask_self_tensor = torch.tensor(mask_self, dtype=torch.float32).to(self.device)
+                            mask_self = mask.copy()
+                            mask_self[rand_mask_idx] = 0
+                            mask_self_tensor = torch.tensor(mask_self, dtype=torch.float32).to(self.device)
 
-                        self_loss = loss_fn(pred * (1 - mask_self_tensor),
+                            self_loss = loss_fn(pred * (1 - mask_self_tensor),
                                         y_tensor * (1 - mask_self_tensor))
-                        loss_total += lambda_self * self_loss
+                            loss_total += lambda_self * self_loss
 
-                    # Save training loss:
-                    training_loss[e,p,epoch] = loss_total
+                        # Save training loss:
+                        training_loss[e,p,epoch] = loss_total
 
-                    loss_total.backward()
-                    optimizer.step()
+                        loss_total.backward()
+                        optimizer.step()
 
-                    if epoch % 50 == 0:
-                        logger.info(f"[E{e} Phi{p}] Epoch {epoch}/{epochs}: Loss {loss_total.item():.6f}")
+                        if verbose == True: 
+                            if epoch % 50 == 0:
+                                logger.info(f"[E{e} Phi{p}] Epoch {epoch}/{epochs}: Loss {loss_total.item():.6f}")
 
-                # Combine prediction with unmasked data
-                pred_np = pred.detach().cpu().numpy().reshape(npix)
-                inpainted[e, p] = y * mask + pred_np * (1 - mask)
+                    # Combine prediction with unmasked data
+                    pred_np = pred.detach().cpu().numpy().reshape(npix)
+                    inpainted[e, p] = y * mask + pred_np * (1 - mask)
     
         # write training loss array to file:
-        np.save("training_loss",training_loss)
+        np.save(f"{nn_model_savename}_training_loss",training_loss)
 
         # Save NN model:
         torch.save({
@@ -766,12 +780,12 @@ class ContinuumEstimationNN(BinnedBackgroundInterface):
         return
 
     def estimate_bg(self, input_data, psr_file, background_model=None, 
-            training_mode="self", containment=0.6, epochs=800, model_type="gcn",
+            training_mode="self", containment=0.6, epochs=200, model_type="gcn",
             nn_model="new", nn_model_file=None, nn_model_savename="inpainting_nn_model",
             lr=1e-3, self_mask_fraction=0.1, lambda_sup=0.5, lambda_self=0.5,  
             prefix="inpainted", visualize=False, em_bin=2, phi_bin=4, 
             evaluate_only=False, inpainted_file=None,
-            evaluate=False, show_plots=False):
+            evaluate=False, show_plots=False, verbose=True):
 
         """Convenience function for estimating the background. 
         
@@ -831,6 +845,9 @@ class ContinuumEstimationNN(BinnedBackgroundInterface):
             Evaluate after training (inline). Default is False. 
         show_plots : boolean
             Display plots to screen. Default is False. 
+        verbose : bool, optional
+            Gives logger info for validation loss every 50 epochs.
+            Default is False.
         """
         
         # Record run time:
@@ -877,7 +894,7 @@ class ContinuumEstimationNN(BinnedBackgroundInterface):
             nn_model=nn_model, nn_model_file=nn_model_file, nn_model_savename=nn_model_savename,
             epochs=epochs, model_type=model_type,
             lr=lr, self_mask_fraction=self_mask_fraction, 
-            lambda_sup=lambda_sup, lambda_self=lambda_self)
+            lambda_sup=lambda_sup, lambda_self=lambda_self, verbose=verbose)
 
         # Save result
         self.save_inpainted_histpy(input_data_proj, self.inpainted_maps, output_file=f"{prefix}_estimated_bg.h5")
