@@ -929,10 +929,131 @@ class ContinuumEstimationNN(BinnedBackgroundInterface):
 
         return
 
-    def set_parameters(self, **parameters:Dict[str, u.Quantity]) -> None:
-        
-        self.norm = parameters['norm']
+class ContinuumEstimationInterp(ContinuumEstimationNN):
+    
+    """
+    Continuum background estimation using simple wrapped 1D interpolation
+    in HEALPix NESTED index space.
 
-    def expectation(self, axes:Axes, copy: Optional[bool])->Histogram:
+    - Uses the same data loading + PSR-based masking as ContinuumEstimationNN.
+    - Replaces NN inpainting with:
+        For each masked pixel i:
+          * search left (wrapping) for first unmasked pixel -> L
+          * search right (wrapping) for first unmasked pixel -> R
+          * fill(i) = 0.5*(L + R)
+        Edge cases handled with fallbacks.
+    """
+
+    def estimate_bg(self, input_data, psr_file, background_model=None,
+                    prefix="inpainted", containment=0.6, visualize=False, 
+                    em_bin=2, phi_bin=4, evaluate_only=False, inpainted_file=None,
+                    evaluate=False, show_plots=False, verbose=True):
+
+        # Record run time:
+        start_time = time.time()
+
+        # --- Evaluation-only mode (kept compatible) ---
+        if evaluate_only is True:
+            if not background_model or not inpainted_file:
+                raise ValueError("--evaluate-only requires --background_model and --inpainted-file")
+            true_hist = Histogram.open(background_model)
+            inpainted_hist = Histogram.open(inpainted_file)
+            self.evaluate_inpainting_accuracy(true_hist,
+                                              inpainted_hist, prefix=prefix, show_plots=show_plots)
+            return
+
+        if evaluate and background_model is None:
+            raise ValueError("--evaluate requires --background_model")
+
+        # Load data + PSR (same as base class) 
+        input_data_proj, input_data_map = self.load_projected_data(input_data)
+        psr_proj, psr_map = self.load_projected_psr(psr_file)
+
+        # Optional background model (for evaluation)
+        model_map = None
+        model_proj = None
+        if background_model:
+            model_proj, model_map = self.load_projected_model(background_model)
+
+        npix = input_data_map.shape[-1]
+
+        # Mask from PSR:
+        mask_map = self.mask_from_cumdist_vectorized(psr_map, containment=containment)
+        # mask_map is float 0/1; treat "keep" as True
+        keep_map = (mask_map == 1)
+
+        # Interpolation inpaint:
+        inpainted = np.array(input_data_map, copy=True)
+
+        # Helper: fill a single 1D slice (length npix)
+        def _interp_fill_1d(y, keep):
+            # y: (npix,), keep: (npix,) bool, where keep==True means NOT masked
+            out = y.copy()
+            masked_idx = np.where(~keep)[0]
+            if masked_idx.size == 0:
+                return out
+
+            for i in masked_idx:
+                # search left for first unmasked
+                left_val = None
+                j = (i - 1) % npix
+                while j != i:
+                    if keep[j]:
+                        v = y[j]
+                        # accept finite; if non-finite, keep scanning
+                        if np.isfinite(v):
+                            left_val = v
+                            break
+                    j = (j - 1) % npix
+
+                # search right for first unmasked AND non-zero
+                right_val = None
+                j = (i + 1) % npix
+                while j != i:
+                    if keep[j]:
+                        v = y[j]
+                        if np.isfinite(v):
+                            right_val = v
+                            break
+                    j = (j + 1) % npix
+
+                # assign with edge-case handling
+                if (left_val is not None) and (right_val is not None):
+                    out[i] = 0.5 * (left_val + right_val)
+                elif left_val is not None:
+                    out[i] = left_val
+                elif right_val is not None:
+                    out[i] = right_val
+                else:
+                    out[i] = 0.0
+
+            return out
+
+        # Loop over (Em, Phi) planes
+        # input_data_map is dense array from Histogram.project([...]).contents.todense()
+        # shape expected: (nEm, nPhi, npix)
+        nEm = inpainted.shape[0]
+        nPhi = inpainted.shape[1]
+        for e in range(nEm):
+            for p in range(nPhi):
+                inpainted[e, p] = _interp_fill_1d(inpainted[e, p], keep_map[e, p])
+
+        self.inpainted_maps = inpainted
+
+        # Save result
+        self.save_inpainted_histpy(input_data_proj, self.inpainted_maps, output_file=f"{prefix}_estimated_bg.h5")
         
-        return self.norm*self.inpainted_map
+        #  Visualization:
+        if visualize:
+            self.visualize_and_save(input_data_map, mask_map, self.inpainted_maps,
+                                    em_bin=em_bin, phi_bin=phi_bin, prefix=prefix, show_plots=show_plots)
+
+        # Inline evaluation:
+        if evaluate:
+            inpainted_hist = Histogram(input_data_proj.axes, contents=self.inpainted_maps, sparse=True)
+            self.evaluate_inpainting_accuracy(model_proj, inpainted_hist, prefix=prefix, show_plots=show_plots)
+
+        end_time = time.time()
+        logger.info(f"Total time elapsed: {end_time - start_time:.2f} seconds")
+
+        return
