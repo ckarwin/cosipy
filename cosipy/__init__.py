@@ -18,5 +18,4 @@ from .ts_map import FastTSMap, MOCTSMap
 from .source_injector import SourceInjector
 
 from .background_estimation import LineBackgroundEstimation
-from .background_estimation import ContinuumEstimation
 from .background_estimation import ContinuumEstimationNN

@@ -949,6 +949,41 @@ class ContinuumEstimationInterp(ContinuumEstimationNN):
                     em_bin=2, phi_bin=4, evaluate_only=False, inpainted_file=None,
                     evaluate=False, show_plots=False, verbose=True):
 
+        """Convenience function for estimating the background. 
+        
+        Parameters
+        ----------
+        input_data : str
+            Path to HDF5 file with the input data that will be used 
+            to estimate the background.
+        psr_file : str
+            Path to point source response HDF5 file. 
+        background_model : hist, optional
+            Optional background model HDF5 file. 
+        containment : float, optional
+            Containment fraction for mask. Default is 0.6. 
+        prefix : str, optional
+            Prefix for output files. Default is 'inpainted'.
+        visualize : boolean, optional
+            Visualize Mollweide plots.
+        em_bin : int, optional
+            Energy bin index for visualization. Default is 2. 
+        phi_bin : int, optional
+            Phi bin index for visualization. Default is 4. 
+        evaluate_only : boolean, optional
+            Skip training and evaluate two histograms. Requires 
+            background_model file and inpainted_file. 
+        inpainted_file : hist, optional
+            Inpainted histogram file (for evaluate-only). Default is None.
+        evaluate : boolean
+            Evaluate after training (inline). Default is False. 
+        show_plots : boolean
+            Display plots to screen. Default is False. 
+        verbose : bool, optional
+            Gives logger info for validation loss every 50 epochs.
+            Default is False.
+        """
+
         # Record run time:
         start_time = time.time()
 

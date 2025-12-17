@@ -1,5 +1,4 @@
 from .LineBackgroundEstimation import LineBackgroundEstimation
-from .ContinuumEstimation import ContinuumEstimation
 from .free_norm_threeml_binned_bkg import *
 from .ContinuumEstimationNN import ContinuumEstimationNN
 from .ContinuumEstimationNN import GCN
