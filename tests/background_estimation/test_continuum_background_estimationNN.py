@@ -1,5 +1,9 @@
 import pytest
-from cosipy.background_estimation import ContinuumEstimationNN
+
+
+pytest.importorskip("torch", reason="Optional torch dependencies not installed")
+
+from cosipy.background_estimation import ContinuumEstimationInterp, ContinuumEstimationNN
 from cosipy import test_data
 
 def test_continuum_background_estimation(tmp_path,monkeypatch):
@@ -43,4 +47,8 @@ def test_continuum_background_estimation(tmp_path,monkeypatch):
         training_mode="hybrid", evaluate_only=True, inpainted_file=input_data,
         containment=0.6, epochs=1, model_type="unet",em_bin=1, phi_bin=1)
 
-    instance.plot_training_loss("training_loss.npy",1,"training_loss",show_plot=False)
+    instance.plot_training_loss("inpainting_nn_model_training_loss.npy",1,"training_loss",show_plot=False)
+
+    # Test simple inpainging method:
+    instance = ContinuumEstimationInterp()
+    instance.estimate_bg(input_data, psr_file)

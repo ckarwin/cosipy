@@ -6,7 +6,6 @@ import healpy as hp
 import argparse
 import matplotlib.pyplot as plt
 from histpy import Histogram, Axes
-from cosipy.background_estimation import ContinuumEstimation
 from cosipy.response import FullDetectorResponse, DetectorResponse
 from cosipy.interfaces import BinnedBackgroundInterface
 from typing import Dict, Tuple, Union, Any, Type, Optional, Iterable
