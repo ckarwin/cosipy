@@ -5,6 +5,7 @@ import pandas as pd
 import healpy as hp
 import argparse
 import matplotlib.pyplot as plt
+from matplotlib.colors import LogNorm
 from histpy import Histogram, Axes
 from cosipy.response import FullDetectorResponse, DetectorResponse
 from cosipy.interfaces import BinnedBackgroundInterface
@@ -386,8 +387,8 @@ class ContinuumEstimationNN(BinnedBackgroundInterface):
 
         # Loss weights should only be applied in hybrid mode:
         if mode != 'hybrid':
-                lambda_sup = 1
-                lambda_self = 1
+            lambda_sup = 1
+            lambda_self = 1
 
         # Progress bar:
         total_steps = n_energy * n_phi
@@ -743,7 +744,7 @@ class ContinuumEstimationNN(BinnedBackgroundInterface):
 
         return
 
-    def plot_training_loss(self,input_file, energy_bin, save_prefix, show_plot=True):
+    def plot_training_loss(self,input_file, energy_bin, save_prefix, show_plot=True, vmax=70000):
 
         """Plot training loss as a function of Phi and number of epochs
         for a given energy bin.
@@ -758,6 +759,8 @@ class ContinuumEstimationNN(BinnedBackgroundInterface):
             Prefix of saved image file.
         show_plot : bool, optional
             Whether to show plot (default is True).
+        vmax : float, optional
+            Max plot value. Default is 70000.
         """
 
         # Load loss data
@@ -771,7 +774,7 @@ class ContinuumEstimationNN(BinnedBackgroundInterface):
         # Create the plot
         plt.figure(figsize=(8, 5))
         plt.imshow(loss_slice, aspect='auto', origin='lower', cmap='viridis',
-           extent=[0, loss_slice.shape[1], 0, loss_slice.shape[0]],vmax=50000)
+           extent=[0, loss_slice.shape[1], 0, loss_slice.shape[0]],vmax=vmax)
 
         plt.colorbar(label='Loss')
         plt.xlabel('Phi bin')
