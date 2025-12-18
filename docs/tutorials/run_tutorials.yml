@@ -171,16 +171,24 @@ tutorials:
           checksum: eb72400a1279325e9404110f909c7785
 
     background_continuum:
-      notebook: background_estimation/continuum_estimation/BG_estimation_example.ipynb
+      notebook: background_estimation/continuum_estimation/BG_estimationNN_example.ipynb
       wasabi_files:
+        COSI-SMEX/cosipy_tutorials/background_estimationNN/crab_and_bg_combined_binned_data.h5:
+          checksum: f5ee6f356ebc30a3168a1697c4ec2bdc
+        COSI-SMEX/cosipy_tutorials/background_estimationNN/crab_binned_data.hdf5:
+          checksum: 405862396dea2be79d7892d6d5bb50d8
+        COSI-SMEX/cosipy_tutorials/background_estimationNN/crab_psr.h5:
+          checksum: 700ea171dd52a989deb0810b20302b0d
+        COSI-SMEX/DC3/Data/Backgrounds/Ge/Binned_BG_Files/Total_BG_3months_binned_for_continuum_filtered_with_SAAcut.hdf5:
+          checksum: 270ba55f0da6bc25d4919709ae6a31c2
+        COSI-SMEX/cosipy_tutorials/background_estimationNN/inputs_crab.yaml:
+          checksum: dd30283e1809ccc51d75ad22cf20e766
+        COSI-SMEX/cosipy_tutorials/background_estimationNN/crab_DC2_astromodel.yaml:
+          checksum: b8366b8e09ede0f29581d1ec466628c6
         COSI-SMEX/DC3/Data/Orientation/DC3_final_530km_3_month_with_slew_15sbins_GalacticEarth_SAA.ori:
           checksum: e5e71e3528e39b855b0e4f74a1a2eebe
-        COSI-SMEX/cosipy_tutorials/background_estimation/crab_bkg_binned_data_galactic.hdf5:
-          checksum: 7450f8ecdf6bf14bffe22d0046d47d49
-        COSI-SMEX/cosipy_tutorials/background_estimation/inputs_crab.yaml:
-          checksum: 3b2c6ddd35d98346d9aac13ce3d59368
-        COSI-SMEX/develop/Data/Responses/SMEXv12.Continuum.HEALPixO3_10bins_log_flat.binnedimaging.imagingresponse.h5:
-          checksum: eb72400a1279325e9404110f909c7785
+        COSI-SMEX/develop/Data/Responses/ResponseContinuum.o3.e100_10000.b10log.s10396905069491.m2284.filtered.nonsparse.binnedimaging.imagingresponse.h5:
+          checksum: 7121f094be50e7bfe9b31e53015b0e85
 
     background_line:
       notebook: background_estimation/line_background/line_background_estimation_example_notebook.ipynb
