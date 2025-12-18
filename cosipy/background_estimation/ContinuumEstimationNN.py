@@ -24,12 +24,14 @@ try:
     import torch.nn as nn
     from torch_geometric.data import Data
     from torch_geometric.nn import GCNConv, GraphUNet as PyGGraphUNet
+    _TORCH_AVAILABLE = True
+    _NN_BASE = nn.Module
 
-except: 
-    logger.warning("PyTorch and PyTorch-Geometric are required for the continnuum background estimation.")
-    sys.exit()
+except ImportError:
+    _TORCH_AVAILABLE = False
+    _NN_BASE = object
 
-class GCN(nn.Module):
+class GCN(_NN_BASE):
      
     def __init__(self, in_channels=1, hidden_channels=32):
        
@@ -60,6 +62,10 @@ class GCN(nn.Module):
         -------
         None
         """
+
+        if not _TORCH_AVAILABLE:
+            raise ImportError(
+                "GCN requires PyTorch and torch-geometric.")
 
         super().__init__()
         self.conv1 = GCNConv(in_channels, hidden_channels)
@@ -849,6 +855,12 @@ class ContinuumEstimationNN(BinnedBackgroundInterface):
             Default is False.
         """
         
+        # This is a required protection in case pytorch is not available. 
+        # It can be removed in the future if pytorch becomes a dependency. 
+        if not _TORCH_AVAILABLE:
+            raise ImportError(
+            "ContinuumEstimationNN requires PyTorch and torch-geometric.")
+
         # Record run time:
         start_time = time.time()
 
