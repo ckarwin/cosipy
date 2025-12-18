@@ -855,7 +855,7 @@ class ContinuumEstimationNN(BinnedBackgroundInterface):
             Default is False.
         """
         
-        # This is a required protection in case pytorch is not available. 
+        # This is a required protection if pytorch is not available. 
         # It can be removed in the future if pytorch becomes a dependency. 
         if not _TORCH_AVAILABLE:
             raise ImportError(
@@ -953,6 +953,8 @@ class ContinuumEstimationInterp(ContinuumEstimationNN):
           * search right (wrapping) for first unmasked pixel -> R
           * fill(i) = 0.5*(L + R)
         Edge cases handled with fallbacks.
+
+    This class can be ran without having pytorch installed. 
     """
 
     def estimate_bg(self, input_data, psr_file, background_model=None,
