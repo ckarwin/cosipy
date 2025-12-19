@@ -108,7 +108,7 @@ class GCN(_NN_BASE):
         
         return self.conv4(x, edge_index)
 
-class ContinuumEstimationNN(BinnedBackgroundInterface):
+class ContinuumEstimationNN():
     
     def __init__(self):
         
