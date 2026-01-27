@@ -1,2 +1,3 @@
 from .LineBackgroundEstimation import LineBackgroundEstimation
 from .ContinuumEstimation import ContinuumEstimation
+from .TransientBackgroundEstimation import TransientBackgroundEstimation
