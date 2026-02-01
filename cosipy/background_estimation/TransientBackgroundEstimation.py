@@ -26,7 +26,7 @@ class TransientBackgroundEstimation:
     
     """
     
-    def __init__(self, data, scaling = "duration"):
+    def __init__(self, data):
         
         """
         Initialize the instance if a transient background.
@@ -36,13 +36,6 @@ class TransientBackgroundEstimation:
         data : histpy.histogram.Histogram
             The histogram containing both signal and background components.
             Must include an axis labeled 'Time'.
-        scaling : str
-            The scaling method: duration or fitting.
-            `duration` scales the background counts by the duration ratio  
-            between the burst and background windows. 
-            `fitting` will fit the background windows before and after the
-            burst to get the fitted background counts during the burst. It
-            will be supported later.
         """
         
         # check if input is histogram object
@@ -53,9 +46,7 @@ class TransientBackgroundEstimation:
             )
             
         self._data = data
-        
-        self._scaling = scaling
-            
+                    
         self._axes_labels = list(self._data.axes.labels)
         
         # check if the data has Time axis
@@ -166,6 +157,12 @@ class TransientBackgroundEstimation:
             
         for i in timetags:
             
+            if i[0] >= i[1]:
+                
+                raise ValueError(
+                    "`start` must be smaller than `end`."
+                )
+            
             self._burst_windows += [i]
         
         return
@@ -213,7 +210,21 @@ class TransientBackgroundEstimation:
         return
     
     
-    def make_background_model(self, save_path = None):
+    def make_background_model(self, scaling = "duration", save_path = None):
+        
+        """
+        
+        Parameters
+        ----------
+        scaling : str
+            The scaling method: duration or fitting.
+            `duration` scales the background counts by the duration ratio  
+            between the burst and background windows. 
+            `fitting` will fit the background windows before and after the
+            burst to get the fitted background counts during the burst. It
+            will be supported later.
+            
+        """
         
         if not self._bkg_windows:
             raise ValueError(
@@ -238,10 +249,10 @@ class TransientBackgroundEstimation:
             
         unit_bkg = total_bkg/(np.sum(self.bkg_durations))
             
-        if self._scaling == "duration":
+        if scaling == "duration":
             bkg_model = self.burst_durations[0]*unit_bkg
         
-        elif self._scaling == "fitting":
+        elif scaling == "fitting":
             raise NotImplementedError(
                 "The scaling by fitting the background before and after the burst \
                 is not implemented yet!"
