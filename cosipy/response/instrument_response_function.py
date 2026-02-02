@@ -1,6 +1,7 @@
 import itertools
 from typing import Iterable, Tuple
 
+import torch
 import numpy as np
 from astropy.coordinates import SkyCoord
 
@@ -17,8 +18,69 @@ from cosipy.interfaces.instrument_response_interface import FarFieldInstrumentRe
     FarFieldSpectralInstrumentResponseFunctionInterface
 from cosipy.interfaces.photon_parameters import PhotonInterface, PhotonWithDirectionAndEnergyInSCFrameInterface, PhotonListWithDirectionInterface
 from cosipy.response import FullDetectorResponse
+from cosipy.response.NNResponse import NNResponse
 from cosipy.util.iterables import itertools_batched
+from operator import attrgetter
 
+class UnpolarizedNNFarFieldInstrumentResponseFunction(FarFieldInstrumentResponseFunctionInterface):
+    
+    photon_type = PhotonWithDirectionAndEnergyInSCFrameInterface
+    event_type = EmCDSEventInSCFrameInterface
+    
+    def __init__(self, response: NNResponse,):
+        if response.is_polarized:
+            raise ValueError("The provided NNResponse is polarized, but UnpolarizedNNFarFieldInstrumentResponseFunction only supports unpolarized responses.")
+        self._response = response
+    
+    def effective_area_cm2(self, photons: Iterable[PhotonWithDirectionAndEnergyInSCFrameInterface]) -> Iterable[float]:
+        getter = attrgetter('direction_lon_radians', 'direction_lat_radians', 'energy_keV')
+        
+        raw_data = list(map(getter, photons))
+    
+        if not raw_data:
+            return np.array([], dtype=np.float32)
+        
+        context = torch.tensor(raw_data, dtype=torch.float32)
+        context[:, 1] = np.pi/2 - context[:, 1]
+        
+        return self._response.evaluate_effective_area(context).numpy()
+    
+    def event_probability(self, query: Iterable[Tuple[PhotonWithDirectionAndEnergyInSCFrameInterface, EmCDSEventInSCFrameInterface]]) -> Iterable[float]:
+        context_list = []
+        source_list = []
+
+        for photon, event in query:
+            context_list.append((photon.direction_lon_radians, photon.direction_lat_radians, photon.energy_keV))
+            source_list.append((event.energy_keV, event.scattering_angle_rad, event.scattered_lon_rad_sc, event.scattered_lat_rad_sc))
+        
+        if not context_list:
+            return np.array([], dtype=np.float32)
+
+        context = torch.tensor(context_list, dtype=torch.float32)
+        source = torch.tensor(source_list, dtype=torch.float32)
+
+        context[:, 1] = np.pi/2 - context[:, 1]
+        source[:, 3] = np.pi/2 - source[:, 3]
+        
+        return self._response.evaluate_density(context, source).numpy()
+
+    def random_events(self, photons: Iterable[PhotonWithDirectionAndEnergyInSCFrameInterface]) -> Iterable[EventInterface]:
+        getter = attrgetter('direction_lon_radians', 'direction_lat_radians', 'energy_keV')
+        
+        raw_data = list(map(getter, photons))
+    
+        if not raw_data:
+            return []
+        
+        context = torch.tensor(raw_data, dtype=torch.float32)
+        context[:, 1] = np.pi/2 - context[:, 1]
+        
+        samples = self._response.sample_density(context).numpy()
+        samples[:, 3] = np.pi/2 - samples[:, 3]   
+        
+        return [
+            EmCDSEventInSCFrame(e, phi, lon, lat) for e, phi, lon, lat in samples
+            ]
 
 class UnpolarizedDC3InterpolatedFarFieldInstrumentResponseFunction(FarFieldSpectralInstrumentResponseFunctionInterface):
 
