@@ -290,11 +290,19 @@ class UnbinnedThreeMLPointSourceResponseIRFAdaptive(UnbinnedThreeMLSourceRespons
         
         self._sc_ori_unique = self._sc_ori.interp(unique_times_obj)
         
-        unique_ratio = np.interp(self._unique_mjds, 
-                                 self._mid_times.mjd, 
-                                 self._sc_ori.livetime.to_value(u.s) / self._sc_ori.intervals_duration.to_value(u.s))
-        
+        interval_ratios = (self._sc_ori.livetime.to_value(u.s) / self._sc_ori.intervals_duration.to_value(u.s))
+        bin_indices = np.searchsorted(self._sc_ori.obstime.mjd, self._unique_mjds) - 1
+
+        bin_indices = np.clip(bin_indices, 0, len(self._sc_ori.livetime) - 1)
+        unique_ratio = interval_ratios[bin_indices]
+
         self._livetime_ratio = unique_ratio[self._inv_idx].astype(np.float32)
+        
+        #unique_ratio = np.interp(self._unique_mjds, 
+        #                         self._mid_times.mjd, 
+        #                         self._sc_ori.livetime.to_value(u.s) / self._sc_ori.intervals_duration.to_value(u.s))
+        #
+        #self._livetime_ratio = unique_ratio[self._inv_idx].astype(np.float32)
         
         #wrong_order = np.where(((data_times[1:] - data_times[:-1]) <= 0))[0]
         #data_times[wrong_order + 1] = data_times[wrong_order + 1] + 1
@@ -501,7 +509,6 @@ class UnbinnedThreeMLPointSourceResponseIRFAdaptive(UnbinnedThreeMLSourceRespons
         total_area = np.zeros(n_energy, dtype=np.float64)
 
         for i in range(0, n_time, batch_size_time):
-            print("start_area_loop")
             start = i
             end = min(i + batch_size_time, n_time)
             current_n_time = end - start
@@ -515,13 +522,11 @@ class UnbinnedThreeMLPointSourceResponseIRFAdaptive(UnbinnedThreeMLSourceRespons
                 for l, b, e in zip(batch_lons, batch_lats, batch_energies)
             ]
 
-            print("start_area_calc")
             eff_areas_flat = np.fromiter(
                 self._irf.effective_area_cm2(photons), 
                 dtype=np.float32, 
                 count=len(photons)
             )
-            print("stop_area_calc")
 
             eff_areas_grid = eff_areas_flat.reshape(current_n_time, n_energy)
             t_w_batch = time_weights[start:end]
@@ -761,7 +766,6 @@ class UnbinnedThreeMLPointSourceResponseIRFAdaptive(UnbinnedThreeMLSourceRespons
         data_iter = iter(self._data)
 
         for i in range(0, self._n_events, batch_size_events):
-            print("start_density_loop")
             start = i
             end = min(i + batch_size_events, self._n_events)
             current_n = end - start
@@ -792,7 +796,6 @@ class UnbinnedThreeMLPointSourceResponseIRFAdaptive(UnbinnedThreeMLSourceRespons
 
             event_pairs = list(zip(photons, expanded_events))
 
-            print("start_density_calc")
             densities_flat = np.fromiter(
                 self._irf.event_probability(event_pairs), 
                 dtype=np.float32, 
@@ -804,7 +807,6 @@ class UnbinnedThreeMLPointSourceResponseIRFAdaptive(UnbinnedThreeMLSourceRespons
                 dtype=np.float32, 
                 count=len(photons)
             )
-            print("stop_density_calc")
 
             res_block = torch.from_numpy(densities_flat * eff_areas_flat).reshape(current_n, n_energy)
 
@@ -844,15 +846,11 @@ class UnbinnedThreeMLPointSourceResponseIRFAdaptive(UnbinnedThreeMLSourceRespons
             return
         else:
             if area_recalculation:
-                print("start_area_computation")
                 self._compute_area()
-                print("stop_area_computation")
                 
             if pdf_recalculation:
                 self._init_node_pool()
-                print("start_density_computation")
                 self._compute_density()
-                print("stop_density_computation")
             
             self._last_convolved_source_skycoord = source_coord.copy()
     
@@ -991,14 +989,12 @@ class UnbinnedThreeMLPointSourceResponseIRFAdaptive(UnbinnedThreeMLSourceRespons
             self._exp_density = np.zeros(self._n_events, dtype=np.float64)
 
             if self._irf_energy_node_cache is not None:
-                print("Start full")
                 flux = self._source(self._irf_energy_node_cache)
                 flux = torch.as_tensor(flux, dtype=self._irf_cache.dtype)#.view(self._irf_cache.shape)
 
                 self._exp_density[:] = torch.einsum('ij,ij->i', self._irf_cache, flux).numpy().astype(np.float64)
 
             else:
-                print("Start batched")
                 sc_coord_sph = self._sc_coord_sph_cache
 
                 lon_ph_rad = sc_coord_sph.lon.rad.astype(np.float32)
@@ -1027,6 +1023,6 @@ class UnbinnedThreeMLPointSourceResponseIRFAdaptive(UnbinnedThreeMLSourceRespons
             
         self._last_convolved_source_dict_density = source_dict
         
-        #print(np.sum(self._exp_density <= 0)/self._n_events * 100)
-        print(self.expected_counts() - np.sum(np.log(self._exp_density+1e-12)))
+        print(np.sum(self._exp_density <= 0)/self._n_events * 100)
+        #print(self.expected_counts() - np.sum(np.log(self._exp_density+1e-12)))
         return self._exp_density+1e-12
