@@ -74,31 +74,24 @@ class RspConverter():
     rsp_axis_order = ("Ei", "NuLambda", "Pol", "Em", "Phi", "PsiChi")
 
     def __init__(self,
-                 default_norm="Linear",
-                 default_emin=90,
-                 default_emax=10000,
-                 alpha=0,
+                 norm=None,
+                 norm_params=[],
                  quiet=False,
                  bufsize = 10000000):
 
-        """
-        Parameters
+        """Parameters
         ----------
-         default_norm : str
-             type of normalisation, if not specified in header;
-             one of {powerlaw, Mono, Linear, Gaussian}
-
-         default_emin, default_emax : float
-             emin/emax used in the simulation source file, if
-             not specified in header (for linear, powerlaw
-             normalization)
-
-         alpha : int
-             value of spectral index (for powerlaw normalization)
-
-         quiet : boolean
+        norm : str, optional
+             type of normalization to use to compute E_i weighting
+             for effective area correction if none specified in .rsp
+             file header; one of {powerlaw, Mono, Linear,
+             Gaussian}. If not specified, use Linear norm as default.
+        norm_params : list-like, optional
+             parameters of default normalization.  If not specified,
+             use values [90, 10000] for Linear normalization for
+             compatibility with old API.
+        quiet : boolean
              disable logging and progress bars (default False)
-
         bufsize: int
              rough size of buffer to be used for reading/writing counts
 
@@ -107,11 +100,12 @@ class RspConverter():
         self.quiet = quiet
         self.bufsize = bufsize
 
-        self.default_norm = default_norm
-        self.default_emin = default_emin
-        self.default_emax = default_emax
-        self.alpha = alpha
-
+        if norm is None:
+            self.norm = "Linear"
+            self.norm_params = [90, 10000]
+        else:
+            self.norm = norm
+            self.norm_params = norm_params
 
     def convert_to_h5(self,
                       rsp_filename,
@@ -160,7 +154,7 @@ class RspConverter():
         with gzip.open(rsp_filename, "rt") as f:
 
             axes, hdr = self._read_response_header(f)
-            eff_area = self._get_eff_area(axes, hdr)
+            eff_area = self._get_eff_area_correction(axes, hdr)
 
             nbins = hdr["nbins"]
             counts = self._read_counts(f, axes, nbins, elt_type)
@@ -211,8 +205,8 @@ class RspConverter():
 
         hdr = {
             "nevents_sim" : 0,
-            "norm"        : self.default_norm,
-            "norm_params" : (self.default_emin, self.default_emax),
+            "norm"        : None,
+            "norm_params" : [],
             "area_sim"    : 0,
             "nbins"       : 0,
             "headers"     : {}
@@ -240,22 +234,15 @@ class RspConverter():
                     hdr["headers"][key] = " ".join(line[1:])
 
                 case 'SP':
+                    # norm information is only useful if non-empty
                     if len(line) > 1:
-                        hdr["norm"] = str(line[1])
-                        norm = hdr["norm"]
+                        norm = str(line[1])
+                        norm_params = self._validate_norm_params(norm, line[2:])
 
-                        if norm == "Linear" :
-                            # emin, emax
-                            hdr["norm_params"] = ( int(line[2]), int(line[3]) )
-                        elif norm == "Gaussian" :
-                            # Gauss_mean, Gauss_sig, Gauss_cutoff
-                            hdr["norm_params"] = ( float(line[2]), float(line[3]), float(line[4]) )
+                        hdr["norm"] = norm
+                        hdr["norm_params"] = norm_params
 
-                    else:
-                        logger.warning(f"norm not found in file! Assuming {hdr['norm']}")
-                        assert hdr['norm'] == 'Linear', "parameters not given for default norm"
-
-                    hdr["headers"][key] = " ".join(line[1:])
+                        hdr["headers"][key] = " ".join(line[1:])
 
                 case 'MS':
                     is_sparse = (line[1] == "true")
@@ -291,14 +278,28 @@ class RspConverter():
                     break
 
                 case 'StopStream': # end of data for dense .rsp -- should never appear
-                    raise RunTimeError("StopStream encountered before StartStream")
+                    raise RuntimeError("StopStream encountered before StartStream")
 
                 case _: # any other field
                     hdr["headers"][key] = " ".join(line[1:])
 
-        # check if the type of spectrum is known
-        assert hdr["norm"] in ("powerlaw", "Mono", "Linear", "Gaussian"), \
-            f"unknown normalisation {hdr['norm']}"
+
+        # if no spectral normalization was specified, use the provided
+        # default
+        if hdr["norm"] is None:
+            logger.warning("RSP file does not specify spectral normalization; "
+                           f"using default: {self.norm} {' '.join(str(x) for x in self.norm_params)}")
+
+            hdr["norm"] = self.norm
+            hdr["norm_params"] = self._validate_norm_params(self.norm, self.norm_params)
+
+            # add a synthetic SP header matching the default normalization
+            if len(hdr["norm_params"]) > 0:
+                param_str = " " + " ".join(str(x) for x in hdr['norm_params'])
+            else:
+                param_str = ""
+
+            hdr["headers"]["SP"] = f"{self.norm}{param_str}"
 
         # check the number of simulated events is not 0
         assert hdr["nevents_sim"] != 0, \
@@ -307,7 +308,6 @@ class RspConverter():
         # check that we are ready to start consuming bin values
         assert hdr["nbins"] > 0, \
             "no bin count provided for response"
-
 
         axes_labels = [ RspConverter.axis_name_map[n] for n in axes_names ]
 
@@ -341,10 +341,86 @@ class RspConverter():
 
         return (axes, hdr)
 
-
-    def _get_eff_area(self, axes, hdr):
+    def _validate_norm_params(self, norm, params):
         """
-        Compute the effective area correction to the raw counts in the response.
+        Validate parameters for a spectral normalization specification.
+
+        Parameters
+        ----------
+        norm : str
+           name of the normaliztion scheme
+        params : list-like
+           parameters for normalization.  These may be either strings
+           or other types; they will be converted to the correct types
+           for their scheme.
+
+        Returns
+        -------
+        params : tuple
+           parsed parameters of types appropriate for scheme
+
+        """
+
+        match norm:
+            case 'Mono':
+                if len(params) > 0:
+                    raise ValueError(f"Mono normalization takes zero params; {len(params)} given")
+                params = ()
+
+            case 'Linear':
+                if len(params) != 2:
+                    raise ValueError(f"Linear normalization takes two params; {len(params)} given")
+                # emin, emax
+                params = ( int(params[0]), int(params[1]) )
+
+            case 'Gaussian':
+                if len(params) != 3:
+                    raise ValueError(f"Gaussian normalization takes three params; {len(params)} given")
+                # mean, sig, cutoff
+                params = ( float(params[0]), float(params[1]), float(params[2]) )
+
+            case 'powerlaw':
+                if len(params) != 3:
+                    raise ValueError(f"powerlaw normalization takes three params; {len(params)} given")
+                # emin, emax, alpha
+                params = ( int(params[0]), int(params[1]), float(params[2]) )
+
+            case _:
+                raise ValueError(f"Unknown normalization {norm}; must be one of Mono, Linear, Gaussian, or powerlaw")
+
+        return params
+
+    def _get_eff_area_correction(self, axes, hdr):
+        """
+        Compute the effective area correction to the raw counts in the
+        response.
+
+        The area correction is defined as follows: for a given source
+        direction s and energy E_i, let n_i be the number of incident
+        particles generated by the simulation, and let a_i be the area
+        of the region in the plane perpendicular to s over which they
+        are generated. (This region covers the entire physical area of
+        the detector.)  If the detector generates Compton events for
+        n_c of incident photons, then the effective area is
+
+          A(s, E_i) = a_i n_c(s, E_i)/n_i(s, E_i).
+
+        Because we store raw (integer) event counts, the count matrix
+        already includes the factor n_c. Hence, the area *correction*
+        A'(s, E_i) is simply a_i / n_i(s, E_i).
+
+        We assume that the simulation used to construct the response
+        casts an equal number of photons for every source direction s,
+        and that for a given direction, the fraction of photons
+        cast in a given energy bin E_i is given by f(E_i) derived from
+        the E_i normalization rule used for the simulation.  Hence, if
+        n_i is the *total* number of incident photons cast, and M is the
+        number of distinct source directions, we have
+
+          A'(s, E_i) = a_i / (n_i f(E_i)/M)
+
+        This quantity is the same for each s, so we return an array of
+        size equal to the number of E_i bins.
 
         Parameters
         ----------
@@ -356,17 +432,17 @@ class RspConverter():
         Returns
         -------
         eff_area : ndarray of float
-           effective area for each Ei bin
+           effective area correction for each Ei bin
 
         """
 
         ewidth = axes['Ei'].widths
-        ecenters = axes['Ei'].centers
 
         norm = hdr["norm"]
 
-        # If we have one single bin, treat the Gaussian norm like the mono one.
-        # Also check that the Gaussian spectrum is fully contained in that bin
+        # If we have one single bin, treat the Gaussian normalization
+        # like the mono one.  Also check that the Gaussian spectrum is
+        # fully contained in that bin
         if norm == "Gaussian" and len(ewidth) == 1:
 
             from scipy.special import erf
@@ -392,25 +468,25 @@ class RspConverter():
                 emin, emax = hdr["norm_params"]
 
                 if not self.quiet:
-                    logger.info(f"normalisation: linear with energy range [{emin}-{emax}]")
+                    logger.info(f"normalization: linear with energy range [{emin}-{emax}]")
 
                 nperchannel_norm = ewidth / (emax - emin)
 
             case "Mono" :
                 if not self.quiet:
-                    logger.info("normalisation: mono")
+                    logger.info("normalization: mono")
 
                 nperchannel_norm = np.array([1.])
 
             case "powerlaw":
-                emin, emax = hdr["norm_params"]
+                emin, emax, alpha = hdr["norm_params"]
 
                 if not self.quiet:
-                    logger.info(f"normalisation: powerlaw with index {self.alpha} with energy range [{emin}-{emax}]keV")
+                    logger.info(f"normalization: powerlaw with index {alpha} with energy range [{emin}-{emax}]keV")
 
                 # From powerlaw
-                e_lo = axes['Ei'].lower_bounds
-                e_hi = axes['Ei'].upper_bounds
+                e_lo = axes['Ei'].lower_bounds.value
+                e_hi = axes['Ei'].upper_bounds.value
 
                 e_lo = np.minimum(emax, e_lo)
                 e_hi = np.minimum(emax, e_hi)
@@ -418,14 +494,14 @@ class RspConverter():
                 e_lo = np.maximum(emin, e_lo)
                 e_hi = np.maximum(emin, e_hi)
 
-                if self.alpha == 1:
-                    nperchannel_norm = np.log(e_hi/e_low) / np.log(emax/emin)
+                if alpha == 1:
+                    nperchannel_norm = np.log(e_hi/e_lo) / np.log(emax/emin)
                 else:
-                    a = 1 - self.alpha
+                    a = 1 - alpha
                     nperchannel_norm = (e_hi**a - e_lo**a) / (emax**a - emin**a)
 
             case "Gaussian" :
-                raise NotImplementedError("Gaussian norm for multiple bins not yet implemented")
+                raise NotImplementedError("Gaussian normalization for multiple bins not yet implemented")
 
         # If Nulambda is full-sky, its nbins will be 1, so division is a no-op.
         # We assume all FISBEL pixels have the same area.
@@ -447,8 +523,8 @@ class RspConverter():
 
         The response is stored as raw counts (in whatever bit width
         was chosen during .rsp reading) in the COUNTS dataset,
-        together with an effective area array, of length equal to the
-        number of Ei bins, in the EFF_AREA dataset.
+        together with an effective area correction array, of length
+        equal to the number of Ei bins, in the EFF_AREA dataset.
 
         The full floating-point response is therefore obtained by
         performing
@@ -480,7 +556,7 @@ class RspConverter():
         counts_dtype : numpy dtype
           integer type of counts dataset
         eff_area : ndarray of float
-          effective area scaling for each Ei
+          effective area correction for each Ei
         h5_filename : string
           file name to be written
         compress : bool
@@ -532,7 +608,8 @@ class RspConverter():
         for label in axes.labels:
             axes_desc_group.attrs[label] = RspConverter.axis_description[label]
 
-        # save effective area for each Ei; make it an array if scalar
+        # save effective area correction for each Ei; make it an array
+        # if scalar
         eff_area = np.broadcast_to(eff_area, axes["Ei"].nbins)
         drm.create_dataset('EFF_AREA', data=eff_area, track_times=False)
 

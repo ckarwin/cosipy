@@ -39,18 +39,13 @@ class BinnedExpectationInterface(ExpectationInterface, Protocol):
 
 @runtime_checkable
 class ExpectationDensityInterface(ExpectationInterface, Protocol):
-    """
-    This interface doesn't take an EventDataInterface or Iterable[EventInterface]
-    because that would complicate caching. The stream of events is assumed
-    constant after selection.
-    """
 
     # The event class that the instance handles
+    event_data_type = EventDataInterface
+
     @property
     def event_type(self) -> Type[EventInterface]:
-        """
-        The event class that the implementation can handle
-        """
+        return self.event_data_type.event_type
 
     def expected_counts(self) -> float:
         """

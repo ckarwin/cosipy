@@ -24,7 +24,7 @@ def main():
     toy_axis = Axis(np.linspace(-5, 5), label='x')
 
     # Some options
-    unbinned = False     # Binned=False or unbinned=True
+    unbinned = True     # Binned=False or unbinned=True
     plot = True         # Plots the fit
     use_signal = True   # False = bkg-only
     use_bkg = True      # False = signal-only

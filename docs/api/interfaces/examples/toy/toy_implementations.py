@@ -75,7 +75,7 @@ class ToyEvent(TimeTagEventInterface, EventInterface):
 class ToyData(DataInterface):
     pass
 
-class ToyEventDataStream(ToyData):
+class ToyEventDataStream(TimeTagEventDataInterface, ToyData):
     # This simulates reading event from file
     # Check that they are not being read twice
 
@@ -110,7 +110,7 @@ class ToyEventData(TimeTagEventDataInterface, ToyData):
 
     def __init__(self, loader:ToyEventDataStream, selector:EventSelectorInterface = None):
 
-        self._loader = selector(loader)
+        self._loader = [e for e,select in zip(loader, selector.select(loader)) if select]
         self._cached_iter = None
         self._nevents = None  # After selection
 
@@ -165,7 +165,7 @@ class ToyBinnedData(BinnedDataInterface, ToyData):
     def axes(self) -> Axes:
         return self._data.axes
 
-    def fill(self, event_data:Iterable[ToyEvent]):
+    def fill(self, event_data:ToyEventData):
 
         x = np.fromiter([e.x for e in event_data], dtype = float)
 
@@ -180,6 +180,8 @@ class ToyBkg(BinnedBackgroundInterface, BackgroundDensityInterface):
     # code readability, especially if you use an IDE.
     """
 
+    event_data_type = ToyEventData
+
     def __init__(self, data: ToyEventData, duration:Quantity, axis:Axis):
 
         self._data = data
@@ -189,10 +191,6 @@ class ToyBkg(BinnedBackgroundInterface, BackgroundDensityInterface):
         self._norm = 1 # Hz
 
         self._unit_expectation_density = self._duration / (axis.hi_lim - axis.lo_lim)
-
-    @property
-    def event_type(self) -> Type[EventInterface]:
-        return ToyEvent
 
     def set_parameters(self, **parameters:u.Quantity) -> None:
         self._norm = parameters['norm'].to_value(u.Hz)
@@ -223,16 +221,14 @@ class ToyPointSourceResponse(BinnedThreeMLSourceResponseInterface, UnbinnedThree
     The normalization --the "flux"-- is the only free parameters
     """
 
+    event_data_type = ToyEventData
+
     def __init__(self, data: ToyEventData, duration:Quantity, axis:Axis):
         self._data = data
         self._source = None
         self._duration = duration.to_value(u.s)
         self._unit_expectation = Histogram(axis,
                                            contents= self._duration * np.diff(norm.cdf(axis.edges)))
-
-    @property
-    def event_type(self) -> Type[EventInterface]:
-        return ToyEvent
 
     def expected_counts(self) -> float:
 
@@ -283,6 +279,8 @@ class ToyPointSourceResponse(BinnedThreeMLSourceResponseInterface, UnbinnedThree
 
 class ToyModelFolding(BinnedThreeMLModelFoldingInterface, UnbinnedThreeMLModelFoldingInterface):
 
+    event_data_type = ToyEventData
+
     def __init__(self, data:ToyEventData, psr: ToyPointSourceResponse):
 
         self._data = data
@@ -290,10 +288,6 @@ class ToyModelFolding(BinnedThreeMLModelFoldingInterface, UnbinnedThreeMLModelFo
 
         self._psr = psr
         self._psr_copies = {}
-
-    @property
-    def event_type(self):
-        return ToyEvent
 
     def expected_counts(self) -> float:
 

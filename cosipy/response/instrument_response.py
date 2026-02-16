@@ -274,10 +274,9 @@ class BinnedInstrumentResponse(BinnedInstrumentResponseInterface):
         else:
             weight_unit = None
 
-        self._dr._add_rot_psrs(out_axes, weight,
-                               loc_psichi_pixels,
-                               (loc_src_pixels,), (out.value,))
-
+        out.value[:] += self._dr._rot_psr(out_axes, weight,
+                                  loc_psichi_pixels,
+                                  (loc_src_pixels,))
 
         if weight_unit is not None:
             out = u.Quantity(out.value, weight_unit*out.unit, copy = False)

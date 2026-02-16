@@ -65,6 +65,11 @@ class UnbinnedLikelihood(UnbinnedLikelihoodInterface):
         for density_iter_chunk in itertools_batched(self._expectation.expectation_density(), self._batch_size):
 
             density = np.fromiter(density_iter_chunk, dtype=float)
+
+            if np.any(density == 0):
+                # np.log(0) = -inf for any event, no need to keep iterationg
+                return -np.inf
+
             density_log_sum += np.sum(np.log(density))
             nobservations += density.size
 

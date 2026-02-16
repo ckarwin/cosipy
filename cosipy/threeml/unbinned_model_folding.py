@@ -5,9 +5,7 @@ import numpy as np
 from astromodels import Model, PointSource, ExtendedSource
 
 from cosipy.interfaces import UnbinnedThreeMLModelFoldingInterface, UnbinnedThreeMLSourceResponseInterface
-from cosipy.interfaces.data_interface import EventDataInSCFrameInterface, EventDataInterface
 from cosipy.response.threeml_response import ThreeMLModelFoldingCacheSourceResponsesMixin
-
 
 class UnbinnedThreeMLModelFolding(UnbinnedThreeMLModelFoldingInterface, ThreeMLModelFoldingCacheSourceResponsesMixin):
 

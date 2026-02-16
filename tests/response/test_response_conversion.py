@@ -1,8 +1,10 @@
 from cosipy import test_data
-
+7
 from cosipy.response import FullDetectorResponse, RspConverter
 
 rspgz_response_path = test_data.path / "test_full_detector_response.rsp.gz"
+
+rspgz_nonorm_response_path = test_data.path / "test_full_detector_response_no_norm.rsp.gz"
 
 h5_response_path = test_data.path / "test_full_detector_response.h5"
 
@@ -45,6 +47,64 @@ def test_convert_rsp_to_h5(tmp_path):
     fdr2.close()
 
     assert h1 == h2
+
+def test_default_norms(tmp_path):
+
+    tmp_h5_filename = tmp_path / "fdr.h5"
+
+    c = RspConverter(bufsize = 100000,
+                     norm = "Linear",
+                     norm_params = [50, 1000])
+
+    c.convert_to_h5(rspgz_nonorm_response_path,
+                    h5_filename = tmp_h5_filename,
+                    overwrite = True)
+
+    fdr = FullDetectorResponse.open(tmp_h5_filename)
+    norm_info = fdr.headers["SP"]
+    assert norm_info == "Linear 50 1000"
+    fdr.close()
+
+    c = RspConverter(bufsize = 100000,
+                     norm = "Mono")
+
+    c.convert_to_h5(rspgz_nonorm_response_path,
+                    h5_filename = tmp_h5_filename,
+                    overwrite = True)
+
+    fdr = FullDetectorResponse.open(tmp_h5_filename)
+    norm_info = fdr.headers["SP"]
+    assert norm_info == "Mono"
+    fdr.close()
+
+    c = RspConverter(bufsize = 100000,
+                     norm = "powerlaw",
+                     norm_params = [50, 1000, 0.9])
+
+    c.convert_to_h5(rspgz_nonorm_response_path,
+                    h5_filename = tmp_h5_filename,
+                    overwrite = True)
+
+    fdr = FullDetectorResponse.open(tmp_h5_filename)
+    norm_info = fdr.headers["SP"]
+    assert norm_info == "powerlaw 50 1000 0.9"
+    fdr.close()
+
+    c = RspConverter(bufsize = 100000,
+                     norm = "powerlaw",
+                     norm_params = [50, 1000, 1])
+
+    c.convert_to_h5(rspgz_nonorm_response_path,
+                    h5_filename = tmp_h5_filename,
+                    overwrite = True)
+
+    fdr = FullDetectorResponse.open(tmp_h5_filename)
+    norm_info = fdr.headers["SP"]
+    assert norm_info == "powerlaw 50 1000 1.0"
+    fdr.close()
+
+    # cannot test Gaussian norm because it can only be used on
+    # a response with a single Ei bin
 
 def test_convert_h5_to_rsp(tmp_path):
 

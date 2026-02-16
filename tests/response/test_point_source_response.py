@@ -138,11 +138,15 @@ def test_get_expectation():
     ## test when rsp does have 'Pol' axis
     const = Constant(k=1e-1)
     const.k.unit = norm
-    ## throw an error if polarization is not given
-    with pytest.raises(RuntimeError) as r_error:
-        exp = psr_pol.get_expectation(const)
-    assert r_error.type is RuntimeError
+
     ## get expectation with polarization
     exp = psr_pol.get_expectation(const, polarization=LinearPolarization(angle=180, degree=100))
     assert isinstance(exp, Histogram)
     assert np.isclose(np.sum(exp.contents), 6.30823539e+11, rtol=1e-8)
+
+    # If polarization is not given, the result should be the same as PD=0
+    exp_none = psr_pol.get_expectation(const)
+    exp0 = psr_pol.get_expectation(const, polarization=LinearPolarization(angle=0, degree=0))
+    assert exp0 == exp_none
+
+

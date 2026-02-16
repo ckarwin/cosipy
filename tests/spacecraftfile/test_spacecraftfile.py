@@ -114,6 +114,35 @@ def test_get_attitude():
     assert np.allclose(attitude.as_matrix(), matrix)
 
 
+def test_interp_attitude():
+    ori_path = test_data.path / "20280301_first_10sec.ori"
+    ori = SpacecraftHistory.open(ori_path)
+
+    assert np.allclose(ori.interp_attitude(Time(1835478000.5, format = 'unix')).as_quat(), [ 0.21284241, -0.55635581,  0.28699984,  0.75019825])
+
+    # Multiple
+    assert np.allclose(ori.interp_attitude(Time([1835478000.5, 1835478000.5], format='unix')).as_quat(),
+                       [[0.21284241, -0.55635581, 0.28699984, 0.75019825],[0.21284241, -0.55635581, 0.28699984, 0.75019825]])
+
+    # Test edges
+    assert np.allclose(ori.interp_attitude(Time(1835478000.0, format='unix')).as_quat(), ori.attitude[0].as_quat())
+    assert np.allclose(ori.interp_attitude(Time(1835478001.0, format='unix')).as_quat(), ori.attitude[1].as_quat())
+
+def test_interp_location():
+    ori_path = test_data.path / "20280301_first_10sec.ori"
+    ori = SpacecraftHistory.open(ori_path)
+
+    assert np.allclose(ori.interp_location(Time(1835478000.5, format = 'unix')).cartesian.xyz.to_value(u.km), [ -378.74248737, -6048.59116724, -3346.84533097])
+
+    # Multiple
+    assert np.allclose(ori.interp_location(Time([1835478000.5,1835478000.5], format='unix')).cartesian.xyz.to_value(u.km),
+                       np.transpose([[-378.74248737, -6048.59116724, -3346.84533097],[-378.74248737, -6048.59116724, -3346.84533097]]))
+
+    # Test edges
+    assert np.allclose(ori.interp_location(Time(1835478000.0, format='unix')).cartesian.xyz.to_value(u.km), ori.location[0].cartesian.xyz.to_value(u.km))
+    assert np.allclose(ori.interp_location(Time(1835478001.0, format='unix')).cartesian.xyz.to_value(u.km), ori.location[1].cartesian.xyz.to_value(u.km))
+
+
 def test_get_target_in_sc_frame():
 
     ori_path = test_data.path / "20280301_first_10sec.ori"

@@ -24,10 +24,8 @@ def test_open():
 
         assert response.shape == tuple(response.axes.nbins)
 
-        assert response.eff_area.dtype == np.float32
-        assert len(response.eff_area) == response.axes['Ei'].nbins
-
-        assert response.counts.shape == response.shape
+        assert response.eff_area_correction.dtype == np.float32
+        assert len(response.eff_area_correction) == response.axes['Ei'].nbins
 
         assert arr_eq(response.axes.labels,
                       ['NuLambda', 'Ei', 'Em', 'Phi', 'PsiChi'])
@@ -43,7 +41,7 @@ def test_get_item():
 
     with FullDetectorResponse.open(response_path) as response:
 
-        drm = response.get_pixel(0, weight=1.0)
+        drm = response[0]
 
         assert drm.ndim == 4
 
@@ -52,13 +50,24 @@ def test_get_item():
 
         assert drm.unit.is_equivalent('m2')
 
-        drmu = response.get_pixel(0, weight=1.0 * u.s)
+    with FullDetectorResponse.open(response_path, dtype=np.float32, cache_size = 100) as response:
 
-        assert drmu.unit.is_equivalent('m2 s')
-                
-        drm2 = response[0] # shorthand for get_pixel with unit weight
+        drm = response[0]
 
-        assert drm == drm2
+def test_get_counts():
+
+    with FullDetectorResponse.open(response_path) as response:
+
+        data = response.get_counts(2)
+
+        assert data.shape == tuple(response.axes.nbins[1:])
+
+        data = response.get_counts(2, em_slice = slice(2,3))
+
+        assert data.shape == (response.axes.nbins[1],
+                              1,
+                              response.axes.nbins[3],
+                              response.axes.nbins[4])
 
 def test_get_interp_response():
 
@@ -75,6 +84,29 @@ def test_get_interp_response():
 
         assert drm.unit.is_equivalent('m2')
 
+def test_get_point_source_response():
+
+    orientation = SpacecraftHistory.open(orientation_path)
+    coord = SkyCoord(l=0,b=0,unit=u.deg,frame="galactic")
+
+    with FullDetectorResponse.open(response_path) as response:
+
+        # test call with dwell_map
+        exp_map = orientation.get_dwell_map(coord, base = response)
+
+        psr = response.get_point_source_response(exposure_map = exp_map)
+
+        # test call with source + scatt_map
+        scatt_map = orientation.get_scatt_map(nside=16,
+                                              target_coord=coord)
+
+        psr = response.get_point_source_response(coord=coord,
+                                                 scatt_map=scatt_map)
+
+        # test stripping extra dimensions from SkyCoord
+        coord = SkyCoord(l=[0],b=[0],unit=u.deg,frame="galactic")
+        psr = response.get_point_source_response(coord=coord,
+                                                 scatt_map=scatt_map)
 def test_get_extended_source_response():
 
     orientation = SpacecraftHistory.open(orientation_path)

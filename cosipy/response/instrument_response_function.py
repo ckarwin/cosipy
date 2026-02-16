@@ -11,18 +11,18 @@ from histpy import Histogram
 from scoords import SpacecraftFrame
 
 from cosipy.interfaces import EventInterface
+from cosipy.interfaces.data_interface import EmCDSEventDataInSCFrameInterface
 from cosipy.interfaces.event import TimeTagEmCDSEventInSCFrameInterface, EmCDSEventInSCFrameInterface
-from cosipy.interfaces.instrument_response_interface import FarFieldInstrumentResponseFunctionInterface
-from cosipy.interfaces.photon_list import PhotonListWithDirectionInterface
-from cosipy.interfaces.photon_parameters import PhotonInterface, PhotonWithDirectionAndEnergyInSCFrameInterface
+from cosipy.interfaces.instrument_response_interface import FarFieldInstrumentResponseFunctionInterface, \
+    FarFieldSpectralInstrumentResponseFunctionInterface
+from cosipy.interfaces.photon_parameters import PhotonInterface, PhotonWithDirectionAndEnergyInSCFrameInterface, PhotonListWithDirectionInterface
 from cosipy.response import FullDetectorResponse
 from cosipy.util.iterables import itertools_batched
 
 
-class UnpolarizedDC3InterpolatedFarFieldInstrumentResponseFunction(FarFieldInstrumentResponseFunctionInterface):
+class UnpolarizedDC3InterpolatedFarFieldInstrumentResponseFunction(FarFieldSpectralInstrumentResponseFunctionInterface):
 
-    photon_type = PhotonWithDirectionAndEnergyInSCFrameInterface
-    event_type = EmCDSEventInSCFrameInterface
+    event_data_type = EmCDSEventDataInSCFrameInterface
 
     def __init__(self, response: FullDetectorResponse,
                  batch_size = 100000):
@@ -64,8 +64,8 @@ class UnpolarizedDC3InterpolatedFarFieldInstrumentResponseFunction(FarFieldInstr
 
         for photon_chunk in itertools_batched(photons, self._batch_size):
 
-            lon, lat, energy_keV = np.asarray([[photon.direction_lon_radians,
-                                             photon.direction_lat_radians,
+            lon, lat, energy_keV = np.asarray([[photon.direction_lon_rad_sc,
+                                             photon.direction_lat_rad_sc,
                                              photon.energy_keV] for photon in photon_chunk], dtype=float).transpose()
 
             direction = SkyCoord(lon, lat, unit = u.rad, frame = SpacecraftFrame())
@@ -82,8 +82,8 @@ class UnpolarizedDC3InterpolatedFarFieldInstrumentResponseFunction(FarFieldInstr
 
             # Psi is colatitude (complementary angle)
             lon_ph, lat_ph, energy_i_keV, energy_m_keV, phi_rad, psi_comp, chi  = \
-                np.asarray([[photon.direction_lon_radians,
-                             photon.direction_lat_radians,
+                np.asarray([[photon.direction_lon_rad_sc,
+                             photon.direction_lat_rad_sc,
                              photon.energy_keV,
                              event.energy_keV,
                              event.scattering_angle_rad,

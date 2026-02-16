@@ -97,7 +97,20 @@ class Band_Eflux(Function1D, metaclass=FunctionMeta):
                          K=1.0,
                          xp=E0_*(2 + alpha_),
                          piv=1.0)
-        A_ = K_ / integrate.quad(spectrum_, a_, b_)[0]
+
+        # Cache the normalizing integral so we can reuse its value
+        # instead of recomputing it if its parameters have not
+        # changed. We must test for change in all the parameters of
+        # spectrum_, as testing equality of two Band objects always
+        # returns False.
+
+        params_ = np.array([a_, b_, alpha_, beta_, E0_])
+        if not hasattr(self, "_params") or \
+           not np.array_equal(self._params, params_):
+            self._params = params_
+            self._integral = integrate.quad(spectrum_, a_, b_)[0]
+
+        A_ = K_ / self._integral
 
         return nb_func.band_eval(x_, A_, alpha_, beta_, E0_, 1.0) * unit_
 
@@ -107,14 +120,13 @@ class SpecFromDat(Function1D, metaclass=FunctionMeta):
             A  spectrum loaded from a dat file
         parameters :
             K :
-                desc : Normalization
+                desc : Normalization factor
                 initial value : 1.0
                 is_normalization : True
-                transformation : log10
-                min : 1e-30
-                max : 1e3
-                delta : 0.1
-                units: ph/cm2/s
+                min: 0.0 
+                max: 1e6
+                delta: 1.0
+                units: ph/cm2/s/kev
         properties:
             dat:
                 desc: the data file to load

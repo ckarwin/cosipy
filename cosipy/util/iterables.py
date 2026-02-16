@@ -1,5 +1,8 @@
 import itertools
 
+import numpy as np
+
+
 def itertools_batched(iterable, n, *, strict=False):
     """
     itertools.batched was added in version 3.12.
@@ -14,3 +17,9 @@ def itertools_batched(iterable, n, *, strict=False):
         if strict and len(batch) != n:
             raise ValueError('batched(): incomplete batch')
         yield batch
+
+def asarray(a, dtype):
+    if hasattr(a, "__len__"):
+        return np.asarray(a, dtype = dtype)
+    else:
+        return np.fromiter(a, dtype = dtype)

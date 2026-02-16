@@ -1,6 +1,6 @@
 import itertools
 import operator
-from typing import Protocol, Union, Optional, Iterable, Tuple, runtime_checkable, ClassVar
+from typing import Protocol, Union, Optional, Iterable, Tuple, runtime_checkable, ClassVar, Type
 
 from astropy.coordinates import SkyCoord
 from astropy.time import Time
@@ -8,14 +8,23 @@ from astropy.units import Quantity
 from histpy import Axes, Histogram
 
 from astropy import units as u
+from numba.core.event import broadcast
 from scoords import Attitude
 
-from cosipy.interfaces import BinnedDataInterface, ExpectationDensityInterface, BinnedExpectationInterface, EventInterface
-from cosipy.interfaces.photon_list import PhotonListWithDirectionInterface
-from cosipy.interfaces.photon_parameters import PhotonInterface, PhotonWithDirectionInterface
+from cosipy.interfaces import BinnedDataInterface, ExpectationDensityInterface, BinnedExpectationInterface, \
+    EventInterface, EventDataInterface
+from cosipy.interfaces.data_interface import is_single_event
+from cosipy.interfaces.photon_parameters import PhotonInterface, PhotonWithDirectionInSCFrameInterface, \
+    PhotonListWithDirectionInterface, PhotonListInterface, PhotonListWithDirectionInSCFrameInterface, \
+    PhotonWithDirectionInterface, is_single_photon, PhotonListWithDirectionAndEnergyInSCFrameInterface, \
+    PolarizedPhotonWithDirectionAndEnergyInSCFrameStereographicConventionInterface, \
+    PolarizedPhotonListWithDirectionAndEnergyInSCFrameStereographicConventionInterface
 from cosipy.polarization import PolarizationAngle
 
 __all__ = ["BinnedInstrumentResponseInterface"]
+
+from cosipy.response.photon_types import PhotonListWithDirectionAndEnergyInSCFrame
+
 
 class BinnedInstrumentResponseInterface(BinnedExpectationInterface, Protocol):
 
@@ -63,50 +72,162 @@ class BinnedInstrumentResponseInterface(BinnedExpectationInterface, Protocol):
 class InstrumentResponseFunctionInterface(Protocol):
 
     # The photon class and event class that the IRF implementation can handle
-    photon_type = ClassVar[PhotonInterface]
-    event_type = ClassVar[EventInterface]
+    photon_list_type = PhotonListInterface
+    event_data_type = EventDataInterface
 
-    def event_probability(self, query: Iterable[Tuple[PhotonInterface, EventInterface]]) -> Iterable[float]:
+    @property
+    def photon_type(self) -> Type[PhotonInterface]:
+        return self.photon_list_type.photon_type
+
+    @property
+    def event_type(self) -> Type[EventInterface]:
+        return self.event_data_type.event_type
+
+    def event_probability(self, photons:Union[PhotonInterface, PhotonListInterface], events: Union[EventInterface, EventDataInterface]) -> Union[float, Iterable[float]]:
         """
         Return the probability density of measuring a given event given a photon.
 
         The units of the output the inverse of the phase space of the class event_type data space.
         e.g. if the event measured energy in keV, the units of output of this function are implicitly 1/keV
+
+        If we receive a single photon and a single event, the output is a scalar. Otherwise, it's an iterable.
+        If we receive multiple photons and multiple event, their number must match
+
+        Implementation can define only _event_probability assuming both photons and event are lists, and let this
+        default function handle single photons and single events.
         """
 
-    def random_events(self, photons:Iterable[PhotonInterface]) -> Iterable[EventInterface]:
+        single_photon = is_single_photon(photons)
+        single_event = is_single_event(events)
+
+        if single_photon and single_event:
+            # Just one. Output is scalar
+            photons = self.photon_list_type.from_photon(photons)
+            events = self.event_data_type.from_event(events)
+            return next(iter(self._event_probability(photons, events)))
+        else:
+            # Output is iterable
+            if single_photon:
+                # Single photon, multiple events
+                photons = self.photon_list_type.from_photon(photons, repeat=events.nevents)
+            elif single_event:
+                # Single event, multiple photons
+                events = self.event_data_type.from_event(events, repeat=photons.nphotons)
+
+            return self._event_probability(photons, events)
+
+    def _event_probability(self, photons: PhotonListInterface, events: EventDataInterface) -> Iterable[float]:
         """
-        Return a stream of random events, one per photon
+        This allows implementation to only define the behaviour for list, and let the above function handle
+        the case for a single photon and/or a single event.
+
+        The number of photons should match the number of events.
+        """
+
+
+    def random_events(self, photons:Union[PhotonInterface, PhotonListInterface]) -> Union[EventInterface, EventDataInterface]:
+        """
+        Generate one random event per photon.
+
+        If we receive a single photon, the output is a single event. Otherwise, it's an event data stream.
+
+        Implementation can define only _random_events assuming multiple photons, and let this
+        default function handle single photon case
+        """
+
+        single_photon = is_single_photon(photons)
+
+        if single_photon:
+            photons = self.photon_list_type.from_photon(photons)
+            return next(iter(self._random_events(photons)))
+        else:
+            return self._random_events(photons)
+
+    def _random_events(self, photons:PhotonListInterface) -> EventDataInterface:
+        """
+        This allows implementation to only define the behaviour for list, and let the above function handle
+        the case for a single photon and/or a single event.
         """
 
 @runtime_checkable
 class FarFieldInstrumentResponseFunctionInterface(InstrumentResponseFunctionInterface, Protocol):
 
-    def effective_area_cm2(self, photons: Iterable[PhotonWithDirectionInterface]) -> Iterable[float]:
+    photon_list_type = PhotonListWithDirectionInSCFrameInterface
+
+    def effective_area_cm2(self, photons: Union[PhotonWithDirectionInSCFrameInterface, PhotonListWithDirectionInSCFrameInterface]) -> Union[float,Iterable[float]]:
+        """
+        If we receive a single photon, the output is a scalar. Otherwise, it's an iterable
+
+        Implementation can define only _effective_area_cm2 assuming multiple photons, and let this
+        default function handle single photon case
         """
 
+        single_photon = is_single_photon(photons)
+
+        if single_photon:
+            photons = self.photon_list_type.from_photon(photons)
+            return next(iter(self._effective_area_cm2(photons)))
+        else:
+            return self._effective_area_cm2(photons)
+
+    def _effective_area_cm2(self, photons: PhotonListWithDirectionInSCFrameInterface) -> Iterable[float]:
+        """
+        This allows implementation to only define the behaviour for list, and let the above function handle
+        the case for a single photon and/or a single event.
         """
 
-    def differential_effective_area_cm2(self, query: Iterable[Tuple[PhotonWithDirectionInterface, EventInterface]]) -> Iterable[float]:
+    def differential_effective_area_cm2(self, photons: Union[PhotonWithDirectionInSCFrameInterface, PhotonListWithDirectionInSCFrameInterface], events: Union[EventInterface, EventDataInterface]) -> Union[float,Iterable[float]]:
         """
         Event probability multiplied by effective area
 
-        This is provided as a helper function assuming the child classes implemented event_probability
+        The units of the output are cm2 times the inverse of the phase space of the class event_type data space.
+        e.g. if the event measured energy in keV, the units of output of this function are implicitly cm2/keV
+
+        If we receive a single photon and a single event, the output is a scalar. Otherwise, it's an iterable.
+        If we receive multiple photons and multiple event, their number must match
+
+        Implementation can define only _differential_effective_area_cm2 assuming both photons and event are lists, and let this
+        default function handle single photons and single events.
+        """
+
+        single_photon = is_single_photon(photons)
+        single_event = is_single_event(events)
+
+        if single_photon and single_event:
+            # Just one. Output is scalar
+            photons = self.photon_list_type.from_photon(photons)
+            events = self.event_data_type.from_event(events)
+            return next(iter(self._differential_effective_area_cm2(photons, events)))
+        else:
+            # Output is iterable
+            if single_photon:
+                # Single photon, multiple events
+                photons = self.photon_list_type.from_photon(photons, repeat=events.nevents)
+            elif single_event:
+                # Single event, multiple photons
+                events = self.event_data_type.from_event(events, repeat=photons.nphotons)
+
+            return self._differential_effective_area_cm2(photons, events)
+
+    def _differential_effective_area_cm2(self, photons:PhotonListWithDirectionInSCFrameInterface, events: EventDataInterface) -> Iterable[float]:
+        """
+        Event probability multiplied by effective area
+
+        This is provided as a helper function assuming the child classes implemented _event_probability
+
+        The number of photons should match the number of events.
         """
 
         # Guard to avoid infinite recursion in incomplete child classes
         cls = type(self)
-        if (cls.differential_effective_area_cm2 is FarFieldInstrumentResponseFunctionInterface.differential_effective_area_cm2
+        if (cls._differential_effective_area_cm2 is FarFieldInstrumentResponseFunctionInterface._differential_effective_area_cm2
             and
-            cls.event_probability is FarFieldInstrumentResponseFunctionInterface.event_probability):
-            raise NotImplementedError("Implement differential_effective_area_cm2 and/or event_probability")
+            cls._event_probability is FarFieldInstrumentResponseFunctionInterface._event_probability):
+            raise NotImplementedError("Implement _differential_effective_area_cm2 and/or _event_probability")
 
-        query1, query2 = itertools.tee(query, 2)
-        photon_query = [photon for photon,_ in query1]
+        return map(operator.mul, self._effective_area_cm2(photons), self._event_probability(photons, events))
 
-        return map(operator.mul, self.effective_area_cm2(photon_query), self.event_probability(query2))
-
-    def event_probability(self, query: Iterable[Tuple[PhotonWithDirectionInterface, EventInterface]]) -> Iterable[float]:
+    def _event_probability(self, photons:PhotonListWithDirectionInSCFrameInterface, events: EventDataInterface) -> Iterable[float]:
         """
         Return the probability density of measuring a given event given a photon.
 
@@ -118,31 +239,57 @@ class FarFieldInstrumentResponseFunctionInterface(InstrumentResponseFunctionInte
         # Guard to avoid infinite recursion in incomplete child classes
         cls = type(self)
         if (
-                cls.differential_effective_area_cm2 is FarFieldInstrumentResponseFunctionInterface.differential_effective_area_cm2
+                cls._differential_effective_area_cm2 is FarFieldInstrumentResponseFunctionInterface._differential_effective_area_cm2
                 and
-                cls.event_probability is FarFieldInstrumentResponseFunctionInterface.event_probability):
-            raise NotImplementedError("Implement differential_effective_area_cm2 and/or event_probability")
+                cls._event_probability is FarFieldInstrumentResponseFunctionInterface._event_probability):
+            raise NotImplementedError("Implement _differential_effective_area_cm2 and/or _event_probability")
 
-        query1, query2 = itertools.tee(query, 2)
-        photon_query = [photon for photon, _ in query1]
+        return map(operator.truediv, self._differential_effective_area_cm2(photons, events), self._effective_area_cm2(photons))
 
-        return map(operator.truediv, self.differential_effective_area_cm2(query2), self.effective_area_cm2(photon_query))
-
-
-    def effective_area(self, photons: Iterable[PhotonWithDirectionInterface]) -> Iterable[u.Quantity]:
+    def effective_area(self, photons: Union[PhotonWithDirectionInSCFrameInterface, PhotonListWithDirectionInSCFrameInterface]) -> Union[u.Quantity,Iterable[u.Quantity]]:
         """
-        Convenience function
+        Convenience function. Implementation might optimize it
         """
-        for area_cm2 in self.effective_area_cm2(photons):
-            yield u.Quantity(area_cm2, u.cm*u.cm)
+        cm2 = u.cm*u.cm
+        if isinstance(photons, PhotonInterface):
+            return u.Quantity(self.effective_area_cm2(photons), cm2)
+        else:
+            return (u.Quantity(area_cm2, cm2) for area_cm2 in self.effective_area_cm2(photons))
 
-    def differential_effective_area(self, query: Iterable[Tuple[PhotonWithDirectionInterface, EventInterface]]) -> Iterable[u.Quantity]:
-        for area_cm2 in self.differential_effective_area(query):
-            yield u.Quantity(area_cm2, u.cm*u.cm)
+    def differential_effective_area(self, photons: Union[PhotonWithDirectionInSCFrameInterface, PhotonListWithDirectionInSCFrameInterface], events: Union[EventInterface, EventDataInterface]) -> Union[u.Quantity,Iterable[u.Quantity]]:
+        """
+        Convenience function. Implementation might optimize it
+        """
+        cm2 = u.cm * u.cm
 
+        single_photon = is_single_photon(photons)
+        single_event = is_single_event(events)
 
+        if single_photon and single_event:
+            # Just one. Output is scalar
+            photons = self.photon_list_type.from_photon(photons)
+            events = self.event_data_type.from_event(events)
+            return u.Quantity(next(iter(self._differential_effective_area_cm2(photons, events))), cm2)
+        else:
+            # Output is iterable
+            if single_photon:
+                # Single photon, multiple events
+                photons = self.photon_list_type.from_photon(photons, repeat=events.nevents)
+            elif single_event:
+                # Single event, multiple photons
+                events = self.event_data_type.from_event(events, repeat=photons.nphotons)
 
+            return (u.Quantity(area_cm2, cm2) for area_cm2 in self._differential_effective_area_cm2(photons, events))
 
+@runtime_checkable
+class FarFieldSpectralInstrumentResponseFunctionInterface(FarFieldInstrumentResponseFunctionInterface, Protocol):
+
+    photon_list_type = PhotonListWithDirectionAndEnergyInSCFrameInterface
+
+@runtime_checkable
+class FarFieldSpectralPolarizedInstrumentResponseFunctionInterface(FarFieldSpectralInstrumentResponseFunctionInterface, Protocol):
+
+    photon_list_type = PolarizedPhotonListWithDirectionAndEnergyInSCFrameStereographicConventionInterface
 
 
 
