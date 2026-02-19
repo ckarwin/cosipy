@@ -12,75 +12,86 @@ from histpy import Histogram
 from scoords import SpacecraftFrame
 
 from cosipy.interfaces import EventInterface
+from cosipy.interfaces.photon_parameters import PhotonListWithDirectionInSCFrameInterface
 from cosipy.interfaces.data_interface import EmCDSEventDataInSCFrameInterface
 from cosipy.interfaces.event import TimeTagEmCDSEventInSCFrameInterface, EmCDSEventInSCFrameInterface
 from cosipy.interfaces.instrument_response_interface import FarFieldInstrumentResponseFunctionInterface, \
     FarFieldSpectralInstrumentResponseFunctionInterface
-from cosipy.interfaces.photon_parameters import PhotonInterface, PhotonWithDirectionAndEnergyInSCFrameInterface, PhotonListWithDirectionInterface
+from cosipy.interfaces.photon_parameters import PhotonInterface, PhotonWithDirectionAndEnergyInSCFrameInterface, PhotonListWithDirectionInterface, PhotonListWithDirectionAndEnergyInSCFrameInterface
+from cosipy.data_io.EmCDSUnbinnedData import EmCDSEventDataInSCFrameFromArrays
 from cosipy.response import FullDetectorResponse
 from cosipy.response.NNResponse import NNResponse
-from cosipy.util.iterables import itertools_batched
+from cosipy.util.iterables import itertools_batched, asarray
 from operator import attrgetter
 
-class UnpolarizedNNFarFieldInstrumentResponseFunction(FarFieldInstrumentResponseFunctionInterface):
+class UnpolarizedNNFarFieldInstrumentResponseFunction(FarFieldSpectralInstrumentResponseFunctionInterface):
     
-    photon_type = PhotonWithDirectionAndEnergyInSCFrameInterface
-    event_type = EmCDSEventInSCFrameInterface
+    event_data_type = EmCDSEventDataInSCFrameInterface
+    photon_list_type = PhotonListWithDirectionAndEnergyInSCFrameInterface
     
     def __init__(self, response: NNResponse,):
         if response.is_polarized:
             raise ValueError("The provided NNResponse is polarized, but UnpolarizedNNFarFieldInstrumentResponseFunction only supports unpolarized responses.")
         self._response = response
     
-    def effective_area_cm2(self, photons: Iterable[PhotonWithDirectionAndEnergyInSCFrameInterface]) -> Iterable[float]:
-        getter = attrgetter('direction_lon_radians', 'direction_lat_radians', 'energy_keV')
+    @staticmethod
+    def _get_context(photons: PhotonListWithDirectionAndEnergyInSCFrameInterface):
+        lon = asarray(photons.direction_lon_rad_sc, dtype=np.float32)
+        lat = asarray(photons.direction_lat_rad_sc, dtype=np.float32)
+        en  = asarray(photons.energy_keV, dtype=np.float32)
+
+        num_photons = lon.shape[0]
+        context = torch.empty((num_photons, 3), dtype=torch.float32)
+
+        context[:, 0] = torch.from_numpy(lon)
+        context[:, 1] = torch.from_numpy(lat)
+        context[:, 2] = torch.from_numpy(en)
         
-        raw_data = list(map(getter, photons))
+        context[:, 1].mul_(-1).add_(np.pi/2)
+        
+        return context
     
-        if not raw_data:
-            return np.array([], dtype=np.float32)
+    @staticmethod
+    def _get_source(events: EmCDSEventDataInSCFrameInterface):
+        lon = asarray(events.scattered_lon_rad_sc, dtype=np.float32)
+        lat = asarray(events.scattered_lat_rad_sc, dtype=np.float32)
+        phi = asarray(events.scattering_angle_rad, dtype=np.float32)
+        en  = asarray(events.energy_keV, dtype=np.float32)
         
-        context = torch.tensor(raw_data, dtype=torch.float32)
-        context[:, 1] = np.pi/2 - context[:, 1]
+        num_events = lon.shape[0]
+        source = torch.empty((num_events, 4), dtype=torch.float32)
+
+        source[:, 0] = torch.from_numpy(en)
+        source[:, 1] = torch.from_numpy(phi)
+        source[:, 2] = torch.from_numpy(lon)        
+        source[:, 3] = torch.from_numpy(lat)
         
-        return self._response.evaluate_effective_area(context).numpy()
+        source[:, 3].mul_(-1).add_(np.pi/2)
+        
+        return source
     
-    def event_probability(self, query: Iterable[Tuple[PhotonWithDirectionAndEnergyInSCFrameInterface, EmCDSEventInSCFrameInterface]]) -> Iterable[float]:
-        context_list = []
-        source_list = []
-
-        for photon, event in query:
-            context_list.append((photon.direction_lon_radians, photon.direction_lat_radians, photon.energy_keV))
-            source_list.append((event.energy_keV, event.scattering_angle_rad, event.scattered_lon_rad_sc, event.scattered_lat_rad_sc))
+    def _effective_area_cm2(self, photons: PhotonListWithDirectionAndEnergyInSCFrameInterface) -> Iterable[float]:
+        context = self._get_context(photons)
         
-        if not context_list:
-            return np.array([], dtype=np.float32)
-
-        context = torch.tensor(context_list, dtype=torch.float32)
-        source = torch.tensor(source_list, dtype=torch.float32)
-
-        context[:, 1] = np.pi/2 - context[:, 1]
-        source[:, 3] = np.pi/2 - source[:, 3]
-        
-        return self._response.evaluate_density(context, source).numpy()
-
-    def random_events(self, photons: Iterable[PhotonWithDirectionAndEnergyInSCFrameInterface]) -> Iterable[EventInterface]:
-        getter = attrgetter('direction_lon_radians', 'direction_lat_radians', 'energy_keV')
-        
-        raw_data = list(map(getter, photons))
+        return np.asarray(self._response.evaluate_effective_area(context))
     
-        if not raw_data:
-            return []
+    def _event_probability(self, photons: PhotonListWithDirectionAndEnergyInSCFrameInterface, events: EmCDSEventDataInSCFrameInterface) -> Iterable[float]:
+        source = self._get_source(events)
+        context = self._get_context(photons)
         
-        context = torch.tensor(raw_data, dtype=torch.float32)
-        context[:, 1] = np.pi/2 - context[:, 1]
+        return np.asarray(self._response.evaluate_density(context, source))
+    
+    def _random_events(self, photons: PhotonListWithDirectionAndEnergyInSCFrameInterface) -> EmCDSEventDataInSCFrameInterface:
+        context = self._get_context(photons)
+        samples = np.asarray(self._response.sample_density(context))
+        samples[:, 3].mul_(-1).add_(np.pi/2)
         
-        samples = self._response.sample_density(context).numpy()
-        samples[:, 3] = np.pi/2 - samples[:, 3]   
-        
-        return [
-            EmCDSEventInSCFrame(e, phi, lon, lat) for e, phi, lon, lat in samples
-            ]
+        return EmCDSEventDataInSCFrameFromArrays(
+            samples[:, 0], # Energy
+            samples[:, 2], # Lon
+            samples[:, 3], # Lat
+            samples[:, 1]  # Phi
+        )
 
 class UnpolarizedDC3InterpolatedFarFieldInstrumentResponseFunction(FarFieldSpectralInstrumentResponseFunctionInterface):
 

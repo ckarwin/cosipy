@@ -79,7 +79,7 @@ class DensityApproximation:
         self._setup_model()
 
     def _setup_model(self):
-        version_map = {
+        version_map: Dict[int, DensityModelProtocol] = {
             1: UnpolarizedDensityCMLPDGaussianCARQSFlow(self._density_input, self._worker_device, self._batch_size, self._compile_mode),
         }
         if self._major_version not in version_map:
@@ -133,7 +133,7 @@ class AreaApproximation:
         self._setup_model()
 
     def _setup_model(self):
-        version_map = {
+        version_map: Dict[int, AreaModelProtocol] = {
             1: UnpolarizedAreaSphericalHarmonicsExpansion(self._area_input, self._worker_device, self._batch_size, self._compile_mode),
         }
         if self._major_version not in version_map:

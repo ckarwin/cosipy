@@ -4,7 +4,7 @@ import torch
 from torch import nn
 import healpy as hp
 import sphericart.torch
-from typing import Protocol, Optional, Literal, List, Union, Tuple, Dict
+from typing import Protocol, Optional, Literal, List, Union, Tuple, Dict, runtime_checkable
 
 CompileMode = Optional[Literal["default", "reduce-overhead", "max-autotune", "max-autotune-no-cudagraphs"]]
 
@@ -104,6 +104,7 @@ class BaseMLP(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.net(x)
 
+@runtime_checkable
 class AreaModelProtocol(Protocol):
     @property
     def context_dim(self) -> int: ...
@@ -301,6 +302,7 @@ class UnpolarizedAreaSphericalHarmonicsExpansion(AreaModelProtocol):
         
         return torch.clamp(result, min=0)
 
+@runtime_checkable
 class DensityModelProtocol(Protocol):
     @property
     def context_dim(self) -> int: ...

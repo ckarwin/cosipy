@@ -15,12 +15,13 @@ from executing import Source
 from histpy import Axis
 
 from cosipy import SpacecraftHistory
-from cosipy.data_io.EmCDSUnbinnedData import EmCDSEventInSCFrame
+from cosipy.data_io.EmCDSUnbinnedData import EmCDSEventInSCFrame, EmCDSEventDataInSCFrameFromArrays
 from cosipy.interfaces import UnbinnedThreeMLSourceResponseInterface, EventInterface
 from cosipy.interfaces.data_interface import TimeTagEmCDSEventDataInSCFrameInterface
 from cosipy.interfaces.event import EmCDSEventInSCFrameInterface, TimeTagEmCDSEventInSCFrameInterface
 from cosipy.interfaces.instrument_response_interface import FarFieldInstrumentResponseFunctionInterface
-from cosipy.response.photon_types import PhotonWithDirectionAndEnergyInSCFrame
+from cosipy.response.photon_types import PhotonWithDirectionAndEnergyInSCFrame, PhotonListWithDirectionAndEnergyInSCFrame
+from cosipy.util.iterables import asarray
 
 from astropy import units as u
 import astropy.constants as c
@@ -277,7 +278,7 @@ class UnbinnedThreeMLPointSourceResponseIRFAdaptive(UnbinnedThreeMLSourceRespons
         self._area_cache: Optional[np.ndarray] = None # cm^2*s*keV
         self._area_energy_node_cache: Optional[np.ndarray] = None
         self._exp_events: Optional[float] = None
-        self._exp_density: Optional[np.ndarray] = None
+        self._exp_density: Optional[torch.Tensor] = None
         
         # Precomputed spacecraft history
         self._mid_times = self._sc_ori.obstime[:-1] + (self._sc_ori.obstime[1:] - self._sc_ori.obstime[:-1]) / 2
@@ -297,6 +298,16 @@ class UnbinnedThreeMLPointSourceResponseIRFAdaptive(UnbinnedThreeMLSourceRespons
         unique_ratio = interval_ratios[bin_indices]
 
         self._livetime_ratio = unique_ratio[self._inv_idx].astype(np.float32)
+        
+        self._energy_m_keV = torch.as_tensor(asarray(self._data.energy_keV, dtype=np.float32))
+        self._phi_rad = torch.as_tensor(asarray(self._data.scattering_angle_rad, dtype=np.float32))
+        
+        self._lon_scatt = torch.as_tensor(asarray(self._data.scattered_lon_rad_sc, dtype=np.float32))
+        self._lat_scatt = torch.as_tensor(asarray(self._data.scattered_lat_rad_sc, dtype=np.float32))
+        self._cos_lat_scatt = torch.cos(self._lat_scatt)
+        self._sin_lat_scatt = torch.sin(self._lat_scatt)
+        self._cos_lon_scatt = torch.cos(self._lon_scatt)
+        self._sin_lon_scatt = torch.sin(self._lon_scatt)
         
         #unique_ratio = np.interp(self._unique_mjds, 
         #                         self._mid_times.mjd, 
@@ -464,7 +475,7 @@ class UnbinnedThreeMLPointSourceResponseIRFAdaptive(UnbinnedThreeMLSourceRespons
 
         self._source = source
     
-    def copy(self) -> "ThreeMLSourceResponseInterface":
+    def copy(self) -> UnbinnedThreeMLSourceResponseInterface:
         new_instance = copy.copy(self)
         new_instance.clear_cache()
         new_instance._source = None
@@ -500,48 +511,51 @@ class UnbinnedThreeMLPointSourceResponseIRFAdaptive(UnbinnedThreeMLSourceRespons
 
         time_weights = (self._sc_ori.livetime.to_value(u.s)).astype(np.float32) * earth_occ_index
 
-        lon_ph_rad = sc_coord_sph.lon.rad.astype(np.float32)
-        lat_ph_rad = sc_coord_sph.lat.rad.astype(np.float32)
+        lon_ph_rad = asarray(sc_coord_sph.lon.rad, dtype=np.float32)
+        lat_ph_rad = asarray(sc_coord_sph.lat.rad, dtype=np.float32)
 
         n_time = len(lon_ph_rad)
         batch_size_time = self._batch_size // n_energy
 
         total_area = np.zeros(n_energy, dtype=np.float64)
+        
+        max_batch_total = n_energy * min(batch_size_time, n_time)
+        batch_lons_buffer = np.empty(max_batch_total, dtype=np.float32)
+        batch_lats_buffer = np.empty(max_batch_total, dtype=np.float32)
+        batch_energies_buffer = np.empty(max_batch_total, dtype=np.float32)
 
         for i in range(0, n_time, batch_size_time):
             start = i
             end = min(i + batch_size_time, n_time)
             current_n_time = end - start
+            current_total = current_n_time * n_energy
+            
+            #np.repeat(lon_ph_rad[start:end], n_energy, out=batch_lons_buffer[:current_total])
+            #np.repeat(lat_ph_rad[start:end], n_energy, out=batch_lats_buffer[:current_total])
 
-            batch_lons = np.repeat(lon_ph_rad[start:end], n_energy)
-            batch_lats = np.repeat(lat_ph_rad[start:end], n_energy)
-            batch_energies = np.tile(e_n, current_n_time)
-
-            photons = [
-                PhotonWithDirectionAndEnergyInSCFrame(l, b, e) 
-                for l, b, e in zip(batch_lons, batch_lats, batch_energies)
-            ]
-
-            eff_areas_flat = np.fromiter(
-                self._irf.effective_area_cm2(photons), 
-                dtype=np.float32, 
-                count=len(photons)
-            )
-
+            batch_lons_buffer[:current_total].reshape(current_n_time, n_energy)[:] = lon_ph_rad[start:end, np.newaxis]
+            batch_lats_buffer[:current_total].reshape(current_n_time, n_energy)[:] = lat_ph_rad[start:end, np.newaxis]
+            batch_energies_buffer[:current_total].reshape(current_n_time, n_energy)[:] = e_n
+            
+            photons = PhotonListWithDirectionAndEnergyInSCFrame(
+                batch_lons_buffer[:current_total],
+                batch_lats_buffer[:current_total],
+                batch_energies_buffer[:current_total]
+                )
+            
+            eff_areas_flat = asarray(self._irf._effective_area_cm2(photons), dtype=np.float32)
             eff_areas_grid = eff_areas_flat.reshape(current_n_time, n_energy)
-            t_w_batch = time_weights[start:end]
-            e_w_flat = e_w.ravel()
 
             total_area += np.einsum('ij,i,j->j', 
                                     eff_areas_grid, 
-                                    t_w_batch, 
-                                    e_w_flat)
+                                    time_weights[start:end], 
+                                    e_w.ravel())
 
         self._area_cache = total_area
     
     def _fill_nodes(self, nodes_out: torch.Tensor, weights_out: torch.Tensor, 
-                             indices: torch.Tensor, mode: int, 
-                             sorted_peaks: torch.Tensor, delta: torch.Tensor):
+                    indices: torch.Tensor, mode: int, 
+                    sorted_peaks: torch.Tensor, delta: torch.Tensor):
         
         Emin, Emax = self._energy_range
         
@@ -721,97 +735,97 @@ class UnbinnedThreeMLPointSourceResponseIRFAdaptive(UnbinnedThreeMLSourceRespons
         
         return nodes, weights
     
-    def _get_CDS_coordinates(self, lon_src: np.ndarray, lat_src: np.ndarray) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        getter = attrgetter('energy_keV', 'scattering_angle_rad', 
-                            'scattered_lon_rad_sc', 'scattered_lat_rad_sc')
+    def _get_CDS_coordinates(self, lon_src_rad: torch.Tensor, lat_src_rad: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        cos_lat_src = torch.cos(lat_src_rad)
+        sin_lat_src = torch.sin(lat_src_rad)
+        cos_lon_src = torch.cos(lon_src_rad)
+        sin_lon_src = torch.sin(lon_src_rad)
         
-        dt = [('energy', 'f4'), ('phi', 'f4'), ('lon', 'f4'), ('lat', 'f4')]
-
-        arr = np.fromiter(map(getter, self._data), dtype=dt, count=self._n_events)
-        
-        energy_m_keV = torch.from_numpy(arr['energy'])
-        phi_rad = torch.from_numpy(arr['phi'])
-        
-        lon_scat = arr['lon']
-        lat_scat = arr['lat']
-
         cos_geo = (
-            np.cos(lat_src) * np.cos(lon_src) * np.cos(lat_scat) * np.cos(lon_scat) +
-            np.cos(lat_src) * np.sin(lon_src) * np.cos(lat_scat) * np.sin(lon_scat) +
-            np.sin(lat_src) * np.sin(lat_scat)
+            cos_lat_src * cos_lon_src * self._cos_lat_scatt * self._cos_lon_scatt +
+            cos_lat_src * sin_lon_src * self._cos_lat_scatt * self._sin_lon_scatt +
+            sin_lat_src * self._sin_lat_scatt
         )
-        cos_geo = np.clip(cos_geo, -1.0, 1.0)
         
-        phi_geo_rad = torch.from_numpy(np.arccos(cos_geo))
-        phi_igeo_rad = np.pi - phi_geo_rad
+        cos_geo = torch.clip(cos_geo, -1.0, 1.0)
+        phi_geo_rad = torch.arccos(cos_geo)
         
-        return energy_m_keV, phi_rad, phi_geo_rad, phi_igeo_rad
+        return phi_geo_rad, np.pi - phi_geo_rad
     
     def _compute_density(self):
         coord = self._source.position.sky_coord
         sc_coord_sph = self._sc_coord_sph_cache
-        #earth_occ_index = self._earth_occ(coord, self._sc_ori_data)
         earth_occ_index = self._earth_occ(coord, self._sc_ori_unique)[self._inv_idx]
 
-        lon_ph_rad = sc_coord_sph.lon.rad.astype(np.float32)
-        lat_ph_rad = sc_coord_sph.lat.rad.astype(np.float32)
+        lon_ph_rad = asarray(sc_coord_sph.lon.rad, dtype=np.float32)
+        lat_ph_rad = asarray(sc_coord_sph.lat.rad, dtype=np.float32)
         
-        energy_m_keV, phi_rad, phi_geo_rad, phi_igeo_rad = self._get_CDS_coordinates(lon_ph_rad, lat_ph_rad)
+        phi_geo_rad, phi_igeo_rad = self._get_CDS_coordinates(torch.as_tensor(lon_ph_rad), torch.as_tensor(lat_ph_rad))
 
         n_energy = self._total_energy_nodes[0]
         batch_size_events = self._batch_size // n_energy
 
         self._irf_cache = torch.zeros((self._n_events, n_energy), dtype=torch.float32)
-
-        data_iter = iter(self._data)
+        
+        buffer_size = n_energy * min(batch_size_events, self._n_events)
+        batch_lon_src_buffer   = np.empty(buffer_size, dtype=np.float32)
+        batch_lat_src_buffer   = np.empty(buffer_size, dtype=np.float32)
+        batch_energy_buffer    = np.empty(buffer_size, dtype=np.float32)
+        batch_phi_buffer       = np.empty(buffer_size, dtype=np.float32)
+        batch_lon_scatt_buffer = np.empty(buffer_size, dtype=np.float32)
+        batch_lat_scatt_buffer = np.empty(buffer_size, dtype=np.float32)
 
         for i in range(0, self._n_events, batch_size_events):
             start = i
             end = min(i + batch_size_events, self._n_events)
             current_n = end - start
+            current_total = current_n * n_energy
 
-            e_sl = energy_m_keV[start:end]
-            p_sl = phi_rad[start:end]
+            e_sl = self._energy_m_keV[start:end]
+            p_sl = self._phi_rad[start:end]
             pg_sl = phi_geo_rad[start:end]
             pig_sl = phi_igeo_rad[start:end]
 
             nodes, weights = self._get_nodes(e_sl, p_sl, pg_sl, pig_sl)
 
             if batch_size_events >= self._n_events:
-                 self._irf_energy_node_cache = nodes.numpy()
+                 self._irf_energy_node_cache = np.asarray(nodes)
 
-            batch_lons = np.repeat(lon_ph_rad[start:end], n_energy)
-            batch_lats = np.repeat(lat_ph_rad[start:end], n_energy)
+            #np.repeat(lon_ph_rad[start:end], n_energy, out=batch_lon_src_buffer[:current_total])
+            #np.repeat(lat_ph_rad[start:end], n_energy, out=batch_lat_src_buffer[:current_total])
+            
+            batch_lon_src_buffer[:current_total].reshape(current_n, n_energy)[:] = lon_ph_rad[start:end, np.newaxis]
+            batch_lat_src_buffer[:current_total].reshape(current_n, n_energy)[:] = lat_ph_rad[start:end, np.newaxis]
+            
+            batch_energy_buffer[:current_total].reshape(current_n, n_energy)[:] = np.asarray(self._energy_m_keV[start:end, np.newaxis])
+            batch_lon_scatt_buffer[:current_total].reshape(current_n, n_energy)[:] = np.asarray(self._lon_scatt[start:end, np.newaxis])
+            batch_lat_scatt_buffer[:current_total].reshape(current_n, n_energy)[:] = np.asarray(self._lat_scatt[start:end, np.newaxis])
+            batch_phi_buffer[:current_total].reshape(current_n, n_energy)[:] = np.asarray(self._phi_rad[start:end, np.newaxis])
 
-            current_batch_events = list(islice(data_iter, current_n))
+            #np.repeat(np.asarray(self._energy_m_keV[start:end]), n_energy, out=batch_energy_buffer[:current_total])
+            #np.repeat(np.asarray(self._lon_scatt[start:end]), n_energy, out=batch_lon_scatt_buffer[:current_total])
+            #np.repeat(np.asarray(self._lat_scatt[start:end]), n_energy, out=batch_lat_scatt_buffer[:current_total])
+            #np.repeat(np.asarray(self._phi_rad[start:end]), n_energy, out=batch_phi_buffer[:current_total])
 
-            nodes_np_flat = nodes.numpy().ravel()
-
-            photons = [
-                PhotonWithDirectionAndEnergyInSCFrame(l, b, en)
-                for l, b, en in zip(batch_lons, batch_lats, nodes_np_flat)
-            ]
-
-            expanded_events = chain.from_iterable(repeat(x, n_energy) for x in current_batch_events)
-
-            event_pairs = list(zip(photons, expanded_events))
-
-            densities_flat = np.fromiter(
-                self._irf.event_probability(event_pairs), 
-                dtype=np.float32, 
-                count=len(photons)
+            photons = PhotonListWithDirectionAndEnergyInSCFrame(
+                batch_lon_src_buffer[:current_total],
+                batch_lat_src_buffer[:current_total],
+                np.asarray(nodes).ravel()
+                )
+            events = EmCDSEventDataInSCFrameFromArrays(
+                batch_energy_buffer[:current_total],
+                batch_lon_scatt_buffer[:current_total],
+                batch_lat_scatt_buffer[:current_total],
+                batch_phi_buffer[:current_total],
             )
+            
+            eff_areas_flat = torch.as_tensor(asarray(self._irf._effective_area_cm2(photons), dtype=np.float32))
+            densities_flat = torch.as_tensor(asarray(self._irf._event_probability(photons, events), dtype=np.float32))
 
-            eff_areas_flat = np.fromiter(
-                self._irf.effective_area_cm2(photons), 
-                dtype=np.float32, 
-                count=len(photons)
-            )
+            res_block = (densities_flat * eff_areas_flat).view(current_n, n_energy)
 
-            res_block = torch.from_numpy(densities_flat * eff_areas_flat).reshape(current_n, n_energy)
-
-            occ = torch.from_numpy(earth_occ_index[start:end]).unsqueeze(1)
-            live = torch.from_numpy(self._livetime_ratio[start:end]).unsqueeze(1)
+            occ = torch.as_tensor(earth_occ_index[start:end]).view(-1, 1)
+            live = torch.as_tensor(self._livetime_ratio[start:end]).view(-1, 1)
             
             res_block *= occ * live * weights
 
@@ -882,7 +896,7 @@ class UnbinnedThreeMLPointSourceResponseIRFAdaptive(UnbinnedThreeMLSourceRespons
                 f.create_dataset('exp_events', data=self._exp_events)
 
             if self._exp_density is not None:
-                f.create_dataset('exp_density', data=self._exp_density,
+                f.create_dataset('exp_density', data=self._exp_density.numpy(),
                                compression='gzip')
 
             if self._last_convolved_source_dict_number is not None:
@@ -936,7 +950,7 @@ class UnbinnedThreeMLPointSourceResponseIRFAdaptive(UnbinnedThreeMLSourceRespons
                 self._exp_events = None
 
             if 'exp_density' in f:
-                self._exp_density = f['exp_density'][:]
+                self._exp_density = torch.from_numpy(f['exp_density'][:])
             else:
                 self._exp_density = None
 
@@ -985,44 +999,41 @@ class UnbinnedThreeMLPointSourceResponseIRFAdaptive(UnbinnedThreeMLSourceRespons
         source_dict = self._source.to_dict()
         
         if (source_dict != self._last_convolved_source_dict_density) or (self._exp_density is None):
-        
-            self._exp_density = np.zeros(self._n_events, dtype=np.float64)
+            self._exp_density = torch.zeros(self._n_events, dtype=self._irf_cache.dtype)
 
             if self._irf_energy_node_cache is not None:
-                flux = self._source(self._irf_energy_node_cache)
-                flux = torch.as_tensor(flux, dtype=self._irf_cache.dtype)#.view(self._irf_cache.shape)
+                flux = torch.as_tensor(self._source(self._irf_energy_node_cache), dtype=self._irf_cache.dtype)
 
-                self._exp_density[:] = torch.einsum('ij,ij->i', self._irf_cache, flux).numpy().astype(np.float64)
+                torch.linalg.vecdot(self._irf_cache, flux, dim=1, out=self._exp_density)
 
             else:
-                sc_coord_sph = self._sc_coord_sph_cache
-
-                lon_ph_rad = sc_coord_sph.lon.rad.astype(np.float32)
-                lat_ph_rad = sc_coord_sph.lat.rad.astype(np.float32)
-
-                energy_m_keV, phi_rad, phi_geo_rad, phi_igeo_rad = self._get_CDS_coordinates(lon_ph_rad, lat_ph_rad)
-
                 n_energy = self._total_energy_nodes[0]
                 batch_size = self._batch_size // n_energy
+                
+                sc_coord_sph = self._sc_coord_sph_cache
+
+                lon_ph_rad = asarray(sc_coord_sph.lon.rad, dtype=np.float32)
+                lat_ph_rad = asarray(sc_coord_sph.lat.rad, dtype=np.float32)
+
+                phi_geo_rad, phi_igeo_rad = self._get_CDS_coordinates(torch.as_tensor(lon_ph_rad), torch.as_tensor(lat_ph_rad))
 
                 for i in range(0, self._n_events, batch_size):
                     end = min(i + batch_size, self._n_events)
 
-                    e_sl = energy_m_keV[i:end]
-                    p_sl = phi_rad[i:end]
+                    e_sl = self._energy_m_keV[i:end]
+                    p_sl = self._phi_rad[i:end]
                     pg_sl = phi_geo_rad[i:end]
                     pig_sl = phi_igeo_rad[i:end]
 
                     nodes, _ = self._get_nodes(e_sl, p_sl, pg_sl, pig_sl)
 
-                    flux = torch.as_tensor(self._source(nodes.numpy()), dtype=self._irf_cache.dtype)#.view(nodes.shape)
-
-                    irf_slice = self._irf_cache[i:end]
-
-                    self._exp_density[i:end] = torch.einsum('ij,ij->i', irf_slice, flux).numpy().astype(np.float64)
+                    flux_batch = torch.as_tensor(self._source(np.asarray(nodes)), dtype=self._irf_cache.dtype)
+                    
+                    torch.linalg.vecdot(self._irf_cache[i:end], flux_batch, dim=1, out=self._exp_density[i:end])
             
         self._last_convolved_source_dict_density = source_dict
         
-        print(np.sum(self._exp_density <= 0)/self._n_events * 100)
+        #print(self._data.time.unix[self._exp_density <= 0][:100])
+        #print(np.sum(self._exp_density <= 0)/self._n_events * 100)
         #print(self.expected_counts() - np.sum(np.log(self._exp_density+1e-12)))
-        return self._exp_density+1e-12
+        return np.asarray(self._exp_density, dtype=np.float64)+1e-12
