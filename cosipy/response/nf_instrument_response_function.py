@@ -6,7 +6,7 @@ from cosipy.interfaces.data_interface import EmCDSEventDataInSCFrameInterface
 from cosipy.interfaces.instrument_response_interface import FarFieldSpectralInstrumentResponseFunctionInterface
 from cosipy.interfaces.photon_parameters import PhotonListWithDirectionAndEnergyInSCFrameInterface
 from cosipy.data_io.EmCDSUnbinnedData import EmCDSEventDataInSCFrameFromArrays
-from cosipy.response.NNResponse import NNResponse
+from cosipy.response.NFResponse import NFResponse
 from cosipy.util.iterables import asarray
 
 
@@ -18,12 +18,12 @@ if find_spec("torch") is None:
 import torch
 
 
-class UnpolarizedNNFarFieldInstrumentResponseFunction(FarFieldSpectralInstrumentResponseFunctionInterface):
+class UnpolarizedNFFarFieldInstrumentResponseFunction(FarFieldSpectralInstrumentResponseFunctionInterface):
     
     event_data_type = EmCDSEventDataInSCFrameInterface
     photon_list_type = PhotonListWithDirectionAndEnergyInSCFrameInterface
     
-    def __init__(self, response: NNResponse,):
+    def __init__(self, response: NFResponse,):
         if response.is_polarized:
             raise ValueError("The provided NNResponse is polarized, but UnpolarizedNNFarFieldInstrumentResponseFunction only supports unpolarized responses.")
         self._response = response

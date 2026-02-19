@@ -8,7 +8,7 @@ if find_spec("torch") is None:
 
 import torch
 import torch.multiprocessing as mp
-from .nn_response_helper import *
+from .nf_response_helper import *
 
 
 def cuda_cleanup_task(_) -> bool:
@@ -163,7 +163,7 @@ class AreaApproximation:
         
         return self._model.evaluate_effective_area(*list_context)
 
-class NNResponse:
+class NFResponse:
     def __init__(self, path_to_model: str, area_batch_size: int = 100_000, density_batch_size: int = 100_000,
                  devices: Optional[List[Union[str, int, torch.device]]] = None,
                  area_compile_mode: CompileMode = "max-autotune-no-cudagraphs", density_compile_mode: CompileMode = "default"):
