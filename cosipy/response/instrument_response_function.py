@@ -1,7 +1,6 @@
 import itertools
 from typing import Iterable, Tuple
 
-import torch
 import numpy as np
 from astropy.coordinates import SkyCoord
 
@@ -12,70 +11,14 @@ from histpy import Histogram
 from scoords import SpacecraftFrame
 
 from cosipy.interfaces import EventInterface
-from cosipy.interfaces.photon_parameters import PhotonListWithDirectionInSCFrameInterface
 from cosipy.interfaces.data_interface import EmCDSEventDataInSCFrameInterface
 from cosipy.interfaces.event import TimeTagEmCDSEventInSCFrameInterface, EmCDSEventInSCFrameInterface
 from cosipy.interfaces.instrument_response_interface import FarFieldInstrumentResponseFunctionInterface, \
     FarFieldSpectralInstrumentResponseFunctionInterface
-from cosipy.interfaces.photon_parameters import PhotonInterface, PhotonWithDirectionAndEnergyInSCFrameInterface, PhotonListWithDirectionInterface, PhotonListWithDirectionAndEnergyInSCFrameInterface
-from cosipy.data_io.EmCDSUnbinnedData import EmCDSEventDataInSCFrameFromArrays
+from cosipy.interfaces.photon_parameters import PhotonInterface, PhotonWithDirectionAndEnergyInSCFrameInterface, PhotonListWithDirectionInterface
 from cosipy.response import FullDetectorResponse
-from cosipy.response.NNResponse import NNResponse
-from cosipy.util.iterables import itertools_batched, asarray
-from operator import attrgetter
+from cosipy.util.iterables import itertools_batched
 
-class UnpolarizedNNFarFieldInstrumentResponseFunction(FarFieldSpectralInstrumentResponseFunctionInterface):
-    
-    event_data_type = EmCDSEventDataInSCFrameInterface
-    photon_list_type = PhotonListWithDirectionAndEnergyInSCFrameInterface
-    
-    def __init__(self, response: NNResponse,):
-        if response.is_polarized:
-            raise ValueError("The provided NNResponse is polarized, but UnpolarizedNNFarFieldInstrumentResponseFunction only supports unpolarized responses.")
-        self._response = response
-    
-    @staticmethod
-    def _get_context(photons: PhotonListWithDirectionAndEnergyInSCFrameInterface):
-        lon = torch.as_tensor(asarray(photons.direction_lon_rad_sc, dtype=np.float32))
-        lat = torch.as_tensor(asarray(photons.direction_lat_rad_sc, dtype=np.float32))
-        en  = torch.as_tensor(asarray(photons.energy_keV, dtype=np.float32))
-        
-        lat = -lat + (np.pi / 2)
-        return torch.stack([lon, lat, en], dim=1)
-    
-    @staticmethod
-    def _get_source(events: EmCDSEventDataInSCFrameInterface):
-        lon = torch.as_tensor(asarray(events.scattered_lon_rad_sc, dtype=np.float32))
-        lat = torch.as_tensor(asarray(events.scattered_lat_rad_sc, dtype=np.float32))
-        phi = torch.as_tensor(asarray(events.scattering_angle_rad, dtype=np.float32))
-        en  = torch.as_tensor(asarray(events.energy_keV, dtype=np.float32))
-        
-        lat = -lat + (np.pi / 2)
-        return torch.stack([en, phi, lon, lat], dim=1)
-    
-    def _effective_area_cm2(self, photons: PhotonListWithDirectionAndEnergyInSCFrameInterface) -> Iterable[float]:
-        context = self._get_context(photons)
-        
-        return np.asarray(self._response.evaluate_effective_area(context))
-    
-    def _event_probability(self, photons: PhotonListWithDirectionAndEnergyInSCFrameInterface, events: EmCDSEventDataInSCFrameInterface) -> Iterable[float]:
-        source = self._get_source(events)
-        context = self._get_context(photons)
-        
-        return np.asarray(self._response.evaluate_density(context, source))
-    
-    def _random_events(self, photons: PhotonListWithDirectionAndEnergyInSCFrameInterface) -> EmCDSEventDataInSCFrameInterface:
-        context = self._get_context(photons)
-        samples = self._response.sample_density(context)
-        samples[:, 3].mul_(-1).add_(np.pi/2)
-        samples = np.asarray(samples)
-        
-        return EmCDSEventDataInSCFrameFromArrays(
-            samples[:, 0], # Energy
-            samples[:, 2], # Lon
-            samples[:, 3], # Lat
-            samples[:, 1]  # Phi
-        )
 
 class UnpolarizedDC3InterpolatedFarFieldInstrumentResponseFunction(FarFieldSpectralInstrumentResponseFunctionInterface):
 

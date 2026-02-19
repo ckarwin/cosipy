@@ -1,10 +1,19 @@
-import normflows as nf
 import numpy as np
-import torch
-from torch import nn
 import healpy as hp
-import sphericart.torch
+
 from typing import Protocol, Optional, Literal, List, Union, Tuple, Dict, runtime_checkable
+
+
+from importlib.util import find_spec
+
+if any(find_spec(pkg) is None for pkg in ["torch", "normflows", "sphericart.torch"]):
+    raise RuntimeError("Install cosipy with [ml] optional package to use this feature.")
+
+import sphericart.torch
+from torch import nn
+import normflows as nf
+import torch
+
 
 CompileMode = Optional[Literal["default", "reduce-overhead", "max-autotune", "max-autotune-no-cudagraphs"]]
 

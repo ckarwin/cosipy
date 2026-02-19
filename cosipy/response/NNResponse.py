@@ -1,7 +1,15 @@
-import torch
 from typing import List, Union
+
+
+from importlib.util import find_spec
+
+if find_spec("torch") is None:
+    raise RuntimeError("Install cosipy with [ml] optional package to use this feature.")
+
+import torch
 import torch.multiprocessing as mp
-from .nnresponse_helper import *
+from .nn_response_helper import *
+
 
 def cuda_cleanup_task(_) -> bool:
     if torch.cuda.is_available():
