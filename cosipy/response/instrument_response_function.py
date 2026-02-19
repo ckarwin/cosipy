@@ -36,39 +36,22 @@ class UnpolarizedNNFarFieldInstrumentResponseFunction(FarFieldSpectralInstrument
     
     @staticmethod
     def _get_context(photons: PhotonListWithDirectionAndEnergyInSCFrameInterface):
-        lon = asarray(photons.direction_lon_rad_sc, dtype=np.float32)
-        lat = asarray(photons.direction_lat_rad_sc, dtype=np.float32)
-        en  = asarray(photons.energy_keV, dtype=np.float32)
-
-        num_photons = lon.shape[0]
-        context = torch.empty((num_photons, 3), dtype=torch.float32)
-
-        context[:, 0] = torch.from_numpy(lon)
-        context[:, 1] = torch.from_numpy(lat)
-        context[:, 2] = torch.from_numpy(en)
+        lon = torch.as_tensor(asarray(photons.direction_lon_rad_sc, dtype=np.float32))
+        lat = torch.as_tensor(asarray(photons.direction_lat_rad_sc, dtype=np.float32))
+        en  = torch.as_tensor(asarray(photons.energy_keV, dtype=np.float32))
         
-        context[:, 1].mul_(-1).add_(np.pi/2)
-        
-        return context
+        lat = -lat + (np.pi / 2)
+        return torch.stack([lon, lat, en], dim=1)
     
     @staticmethod
     def _get_source(events: EmCDSEventDataInSCFrameInterface):
-        lon = asarray(events.scattered_lon_rad_sc, dtype=np.float32)
-        lat = asarray(events.scattered_lat_rad_sc, dtype=np.float32)
-        phi = asarray(events.scattering_angle_rad, dtype=np.float32)
-        en  = asarray(events.energy_keV, dtype=np.float32)
+        lon = torch.as_tensor(asarray(events.scattered_lon_rad_sc, dtype=np.float32))
+        lat = torch.as_tensor(asarray(events.scattered_lat_rad_sc, dtype=np.float32))
+        phi = torch.as_tensor(asarray(events.scattering_angle_rad, dtype=np.float32))
+        en  = torch.as_tensor(asarray(events.energy_keV, dtype=np.float32))
         
-        num_events = lon.shape[0]
-        source = torch.empty((num_events, 4), dtype=torch.float32)
-
-        source[:, 0] = torch.from_numpy(en)
-        source[:, 1] = torch.from_numpy(phi)
-        source[:, 2] = torch.from_numpy(lon)        
-        source[:, 3] = torch.from_numpy(lat)
-        
-        source[:, 3].mul_(-1).add_(np.pi/2)
-        
-        return source
+        lat = -lat + (np.pi / 2)
+        return torch.stack([en, phi, lon, lat], dim=1)
     
     def _effective_area_cm2(self, photons: PhotonListWithDirectionAndEnergyInSCFrameInterface) -> Iterable[float]:
         context = self._get_context(photons)
@@ -83,8 +66,9 @@ class UnpolarizedNNFarFieldInstrumentResponseFunction(FarFieldSpectralInstrument
     
     def _random_events(self, photons: PhotonListWithDirectionAndEnergyInSCFrameInterface) -> EmCDSEventDataInSCFrameInterface:
         context = self._get_context(photons)
-        samples = np.asarray(self._response.sample_density(context))
+        samples = self._response.sample_density(context)
         samples[:, 3].mul_(-1).add_(np.pi/2)
+        samples = np.asarray(samples)
         
         return EmCDSEventDataInSCFrameFromArrays(
             samples[:, 0], # Energy

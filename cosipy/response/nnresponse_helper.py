@@ -340,6 +340,8 @@ class UnpolarizedDensityCMLPDGaussianCARQSFlow(DensityModelProtocol):
         self._latent_size = density_input["latent_size"]
         self._mlp_hidden_units = density_input["mlp_hidden_units"]
         self._mlp_hidden_layers = density_input["mlp_hidden_layers"]
+        self._menergy_cuts = density_input["menergy_cuts"]
+        self._phi_cuts = density_input["phi_cuts"]
         
         self._compile_mode = compile_mode
         self._compiled_cache = {}
@@ -534,14 +536,17 @@ class UnpolarizedDensityCMLPDGaussianCARQSFlow(DensityModelProtocol):
 
         return ctx.to(torch.float32), src.to(torch.float32), jac.to(torch.float32)
     
-    @staticmethod
-    def _valid_samples(samples: torch.Tensor) -> torch.Tensor:
+    def _valid_samples(self, ienergy: torch.Tensor, samples: torch.Tensor) -> torch.Tensor:
         phi_geo_norm = samples[:, 1] + 2 * samples[:, 2] - 1.0
         valid_mask = (samples[:, 0] <  1.0) & \
                      (samples[:, 1] >  0.0) & (samples[:, 1] <= 1.0) & \
                      (samples[:, 2] >= 0.0) & (samples[:, 2] <= 1.0) & \
                      (samples[:, 3] >= 0.0) & (samples[:, 3] <= 1.0) & \
-                     (phi_geo_norm  >  0.0) & (phi_geo_norm  <  1.0)
+                     (phi_geo_norm  >  0.0) & (phi_geo_norm  <  1.0) & \
+                     (samples[:, 0] <= (1 - self._menergy_cuts[0]/ienergy)) & \
+                     (samples[:, 0] >= (1 - self._menergy_cuts[1]/ienergy)) & \
+                     (samples[:, 1] >= self._phi_cuts[0]/np.pi) & \
+                     (samples[:, 1] <= self._phi_cuts[1]/np.pi)
                      
         return valid_mask
 
@@ -594,7 +599,7 @@ class UnpolarizedDensityCMLPDGaussianCARQSFlow(DensityModelProtocol):
                     self._sample_results[curr_idx][0][:batch_len] = self._inverse_transform_coordinates(
                         b_latent, b_ei, b_az_sc, b_pol_sc
                     )
-                    self._sample_results[curr_idx][1][:batch_len] = ~self._valid_samples(b_latent)
+                    self._sample_results[curr_idx][1][:batch_len] = ~self._valid_samples(b_ei, b_latent)
                     
                     self._compute_ready[curr_idx].record(self._compute_stream)
 
@@ -621,7 +626,7 @@ class UnpolarizedDensityCMLPDGaussianCARQSFlow(DensityModelProtocol):
                 
                 b_samples = self._model_op(context=b_ctx, mode="sampling", n_samples=batch_len)
                 result[start:end] = self._inverse_transform_coordinates(b_samples, b_ei, b_az_sc, b_pol_sc)
-                failed_mask[start:end] = ~self._valid_samples(b_samples)
+                failed_mask[start:end] = ~self._valid_samples(b_ei, b_samples)
 
         if self._is_cuda:
             torch.cuda.synchronize(self._worker_device)
