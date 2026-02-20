@@ -114,7 +114,7 @@ class BaseMLP(nn.Module):
         return self.net(x)
 
 @runtime_checkable
-class AreaModelProtocol(Protocol):
+class AreaModel(Protocol):
     @property
     def context_dim(self) -> int: ...
     
@@ -132,7 +132,7 @@ class AreaModelProtocol(Protocol):
 
     def evaluate_effective_area(self, *args: torch.Tensor) -> torch.Tensor: ...
 
-class UnpolarizedAreaSphericalHarmonicsExpansion(AreaModelProtocol):
+class UnpolarizedAreaSphericalHarmonicsExpansion:
     def __init__(self, area_input: Dict, worker_device: Union[str, int, torch.device],
                  batch_size: int, compile_mode: CompileMode = "max-autotune-no-cudagraphs"):
         self._worker_device = torch.device(worker_device)
@@ -312,7 +312,7 @@ class UnpolarizedAreaSphericalHarmonicsExpansion(AreaModelProtocol):
         return torch.clamp(result, min=0)
 
 @runtime_checkable
-class DensityModelProtocol(Protocol):
+class DensityModel(Protocol):
     @property
     def context_dim(self) -> int: ...
     
@@ -335,7 +335,7 @@ class DensityModelProtocol(Protocol):
 
     def evaluate_density(self, *args: torch.Tensor) -> torch.Tensor: ...
     
-class UnpolarizedDensityCMLPDGaussianCARQSFlow(DensityModelProtocol):
+class UnpolarizedDensityCMLPDGaussianCARQSFlow:
     def __init__(self, density_input: Dict, worker_device: Union[str, int, torch.device],
                  batch_size: int, compile_mode: CompileMode = "default"):
         self._worker_device = torch.device(worker_device)
@@ -413,7 +413,7 @@ class UnpolarizedDensityCMLPDGaussianCARQSFlow(DensityModelProtocol):
         return self._batch_size
     
     @batch_size.setter
-    def batch_size(self, value: int): 
+    def batch_size(self, value: int):
         if not isinstance(value, int) or value <= 0:
             raise ValueError(f"Batch size must be a positive integer, got {value}")
         self._batch_size = value

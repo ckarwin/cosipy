@@ -14,7 +14,7 @@ from cosipy.data_io.EmCDSUnbinnedData import EmCDSEventDataInSCFrameFromArrays
 from cosipy.interfaces import UnbinnedThreeMLSourceResponseInterface, EventInterface
 from cosipy.interfaces.data_interface import TimeTagEmCDSEventDataInSCFrameInterface
 from cosipy.interfaces.event import TimeTagEmCDSEventInSCFrameInterface
-from cosipy.interfaces.instrument_response_interface import FarFieldInstrumentResponseFunctionInterface
+from cosipy.interfaces.instrument_response_interface import FarFieldSpectralInstrumentResponseFunctionInterface
 from cosipy.response.photon_types import PhotonListWithDirectionAndEnergyInSCFrame
 from cosipy.util.iterables import asarray
 
@@ -36,7 +36,7 @@ class UnbinnedThreeMLPointSourceResponseIRFAdaptive(UnbinnedThreeMLSourceRespons
     
     def __init__(self,
                  data: TimeTagEmCDSEventDataInSCFrameInterface,
-                 irf: FarFieldInstrumentResponseFunctionInterface,
+                 irf: FarFieldSpectralInstrumentResponseFunctionInterface,
                  sc_history: SpacecraftHistory,):
         
         """
