@@ -1,4 +1,4 @@
-from typing import List, Union, Optional
+from typing import List, Union, Optional, Dict, Tuple
 from pathlib import Path
 
 
@@ -9,7 +9,8 @@ if find_spec("torch") is None:
 
 import torch
 import torch.multiprocessing as mp
-from .NFBase import *
+from .NFResponseModels import UnpolarizedDensityCMLPDGaussianCARQSFlow, UnpolarizedAreaSphericalHarmonicsExpansion
+from .NFBase import DensityApproximation, CompileMode, NFBase, init_density_worker, update_density_worker_settings, AreaModel, DensityModel
 import cosipy.response.NFWorkerState as NFWorkerState
 
 

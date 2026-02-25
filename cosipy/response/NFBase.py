@@ -1,18 +1,391 @@
-from typing import List, Union, Optional
+from typing import List, Union, Optional, Literal, Tuple, Dict, Optional, Callable
 from pathlib import Path
 from abc import ABC, abstractmethod
+import numpy as np
 
 
 from importlib.util import find_spec
 
-if find_spec("torch") is None:
+if any(find_spec(pkg) is None for pkg in ["torch", "normflows"]):
     raise RuntimeError("Install cosipy with [ml] optional package to use this feature.")
 
 import torch
+from torch import nn
 import torch.multiprocessing as mp
-from .NFModels import *
+import normflows as nf
 import cosipy.response.NFWorkerState as NFWorkerState
 
+
+CompileMode = Optional[Literal["default", "reduce-overhead", "max-autotune", "max-autotune-no-cudagraphs"]]
+
+def build_cmlp_diaggaussian_base(input_dim: int, output_dim: int,
+                                 hidden_dim: int, num_hidden_layers: int) -> nf.distributions.BaseDistribution:
+    context_encoder = BaseMLP(input_dim, output_dim, hidden_dim, num_hidden_layers)
+    return ConditionalDiagGaussian(shape=output_dim//2, context_encoder=context_encoder)
+
+def build_c_arqs_flow(base: nf.distributions.BaseDistribution, num_layers: int,
+                      latent_dim: int, context_dim: int, num_bins: int,
+                      num_hidden_units: int, num_residual_blocks: int) -> nf.ConditionalNormalizingFlow:
+        flows = []
+        for _ in range(num_layers):
+            flows += [nf.flows.AutoregressiveRationalQuadraticSpline(num_input_channels = latent_dim,
+                                                                     num_blocks = num_residual_blocks,
+                                                                     num_hidden_channels = num_hidden_units,
+                                                                     num_bins = num_bins,
+                                                                     num_context_channels = context_dim)]
+            flows += [nf.flows.LULinearPermute(latent_dim)]
+        return nf.ConditionalNormalizingFlow(base, flows)
+
+class NNDensityInferenceWrapper(nn.Module):
+    def __init__(self, model: nn.Module):
+        super().__init__()
+        self._model = model
+
+    def forward(self, 
+                source: Optional[torch.Tensor] = None, 
+                context: Optional[torch.Tensor] = None,
+                n_samples: Optional[int] = None, 
+                mode: str = "inference") -> torch.Tensor:
+        if mode == "inference":
+            if context is None:
+                return torch.exp(self._model.log_prob(source))
+            else:
+                return torch.exp(self._model.log_prob(source, context))
+        elif mode == "sampling":
+            if context is None:
+                return self._model.sample(num_samples=n_samples)[0]
+            else:
+                return self._model.sample(num_samples=n_samples, context=context)[0]
+
+class ConditionalDiagGaussian(nf.distributions.BaseDistribution):
+    def __init__(self, shape: Union[int, List[int], Tuple[int, ...]], context_encoder: nn.Module):
+        super().__init__()
+        if isinstance(shape, int):
+            shape = (shape,)
+        if isinstance(shape, list):
+            shape = tuple(shape)
+        self.shape = shape
+        self.n_dim = len(shape)
+        self.d = np.prod(shape)
+        self.context_encoder = context_encoder
+
+    def forward(self, num_samples: int=1, context: Optional[torch.Tensor]=None) -> Tuple[torch.Tensor, torch.Tensor]:
+        encoder_output = self.context_encoder(context)
+        split_ind = encoder_output.shape[-1] // 2
+        mean = encoder_output[..., :split_ind]
+        log_scale = encoder_output[..., split_ind:]
+        eps = torch.randn(
+            (num_samples,) + self.shape, dtype=mean.dtype, device=mean.device
+        )
+        z = mean + torch.exp(log_scale) * eps
+        log_p = -0.5 * self.d * np.log(2 * np.pi) - torch.sum(
+            log_scale + 0.5 * torch.pow(eps, 2), list(range(1, self.n_dim + 1))
+        )
+        return z, log_p
+
+    def log_prob(self, z: torch.Tensor, context: Optional[torch.Tensor]=None) -> torch.Tensor:
+        encoder_output = self.context_encoder(context)
+        split_ind = encoder_output.shape[-1] // 2
+        mean = encoder_output[..., :split_ind]
+        log_scale = encoder_output[..., split_ind:]
+        log_p = -0.5 * self.d * np.log(2 * np.pi) - torch.sum(
+            log_scale + 0.5 * torch.pow((z - mean) / torch.exp(log_scale), 2),
+            list(range(1, self.n_dim + 1)),
+        )
+        return log_p
+
+class BaseMLP(nn.Module):
+    def __init__(self, input_dim: int, output_dim: int, hidden_dim: int, num_hidden_layers: int):
+        super().__init__()
+        
+        layers = []
+        
+        layers.append(nn.Linear(input_dim, hidden_dim))
+        layers.append(nn.ReLU())
+        
+        for _ in range(num_hidden_layers):
+            layers.append(nn.Linear(hidden_dim, hidden_dim))
+            layers.append(nn.ReLU())
+        
+        layers.append(nn.Linear(hidden_dim, output_dim))
+        
+        self.net = nn.Sequential(*layers)
+        
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.net(x)
+
+
+class BaseModel(ABC):
+    
+    def __init__(self, compile_mode: CompileMode, batch_size: int, 
+                 worker_device: Union[str, int, torch.device], input: Dict):
+        self._worker_device = torch.device(worker_device)
+        
+        self._base_model = self._init_model(input)
+        
+        self._compile_mode = compile_mode
+        self._compiled_cache = {}
+        
+        self._update_model_op()
+        
+        self._is_cuda = (self._worker_device.type == 'cuda')
+        self.batch_size = batch_size
+        
+        if self._is_cuda:
+            self._compute_stream = torch.cuda.Stream(device=self._worker_device)
+            self._transfer_stream = torch.cuda.Stream(device=self._worker_device)
+            self._transfer_ready = [torch.cuda.Event(), torch.cuda.Event()]
+            self._compute_ready = [torch.cuda.Event(), torch.cuda.Event()]
+        else:
+            self._compute_stream = None
+            self._transfer_stream = None
+            self._transfer_ready = None
+            self._compute_ready = None
+    
+    @abstractmethod
+    def _init_model(self, input: Dict) -> Union[nn.Module, Callable]: ...
+    
+    @property
+    @abstractmethod
+    def context_dim(self) -> int: ...
+
+    @property
+    def compile_mode(self) -> CompileMode:
+        return self._compile_mode
+
+    @compile_mode.setter
+    def compile_mode(self, value: CompileMode):
+        if value != self._compile_mode:
+            self._compile_mode = value
+            self._update_model_op()
+    
+    def _update_model_op(self):
+        if self._compile_mode is None:
+            self._model_op = self._base_model
+        else:
+            if self._compile_mode not in self._compiled_cache:
+                self._compiled_cache[self._compile_mode] = torch.compile(
+                    self._base_model, 
+                    mode=self._compile_mode
+                )
+            self._model_op = self._compiled_cache[self._compile_mode]
+
+    @property
+    def batch_size(self) -> int: 
+        return self._batch_size
+
+    @batch_size.setter
+    def batch_size(self, value: int):
+        if not isinstance(value, int) or value <= 0:
+            raise ValueError(f"Batch size must be a positive integer, got {value}")
+        self._batch_size = value
+        if self._is_cuda:
+            self._write_gpu_tensors()
+    
+    @abstractmethod
+    def _write_gpu_tensors(self): ...
+
+class AreaModel(BaseModel):
+    @abstractmethod
+    def evaluate_effective_area(self, *args: torch.Tensor) -> torch.Tensor: ...
+
+class DensityModel(BaseModel):
+    @property
+    @abstractmethod
+    def source_dim(self) -> int: ...
+    
+    def _write_gpu_tensors(self):
+        self._eval_inputs = [
+            tuple(torch.empty(self._batch_size, device=self._worker_device) for _ in range(self.source_dim + self.context_dim))
+            for _ in range(2)
+        ]
+        self._eval_results = [torch.empty(self._batch_size, device=self._worker_device) for _ in range(2)]
+
+        self._sample_inputs = [
+            tuple(torch.empty(self._batch_size, device=self._worker_device) for _ in range(self.context_dim))
+            for _ in range(2)
+        ]
+
+        self._sample_results = [
+            (torch.empty((self._batch_size, self.source_dim), device=self._worker_device),
+             torch.empty(self._batch_size, dtype=torch.bool, device=self._worker_device))
+            for _ in range(2)
+        ]
+
+    @torch.inference_mode()
+    def sample_density(self, *args: torch.Tensor) -> torch.Tensor:
+        N = args[0].shape[0]
+        
+        result = torch.empty((N, self.source_dim), dtype=torch.float32, device="cpu")
+        failed_mask = torch.zeros(N, dtype=torch.bool, device="cpu")
+        
+        if self._is_cuda:
+            result, failed_mask = result.pin_memory(), failed_mask.pin_memory()
+            
+            def enqueue_sample_transfer(slot_idx, start_idx):
+                end_idx = min(start_idx + self._batch_size, N)
+                size = end_idx - start_idx
+                for i in range(self.context_dim):
+                    self._sample_inputs[slot_idx][i][:size].copy_(args[i][start_idx:end_idx], non_blocking=True)
+                #self._sample_inputs[slot_idx][0][:size].copy_(energy_keV[start_idx:end_idx], non_blocking=True)
+                #self._sample_inputs[slot_idx][1][:size].copy_(dir_az[start_idx:end_idx], non_blocking=True)
+                #self._sample_inputs[slot_idx][2][:size].copy_(dir_polar[start_idx:end_idx], non_blocking=True)
+        
+        if self._is_cuda and N > 0:
+            with torch.cuda.stream(self._transfer_stream):
+                enqueue_sample_transfer(0, 0)
+                self._transfer_ready[0].record(self._transfer_stream)
+        
+        for i, start in enumerate(range(0, N, self._batch_size)):
+            curr_idx = i % 2
+            next_idx = (i + 1) % 2
+            end = min(start + self._batch_size, N)
+            batch_len = end - start
+            next_start = start + self._batch_size
+            
+            if self._is_cuda:
+                with torch.cuda.stream(self._compute_stream):
+                    self._compute_stream.wait_event(self._transfer_ready[curr_idx])
+                    
+                    #b_ei, b_az, b_pol = [t[:batch_len] for t in self._sample_inputs[curr_idx]]
+                    #
+                    #b_az_sc = torch.stack((torch.sin(b_az), torch.cos(b_az)), dim=1)
+                    #b_pol_sc = torch.stack((torch.sin(b_pol), torch.cos(b_pol)), dim=1)
+                    #
+                    #b_ctx = torch.cat([
+                    #    (b_az_sc + 1) / 2, 
+                    #    (b_pol_sc[:, 1:] + 1) / 2, 
+                    #    (torch.log10(b_ei) / 2 - 1).unsqueeze(1)
+                    #], dim=1).to(torch.float32)
+                    
+                    b_ctx = [t[:batch_len] for t in self._sample_inputs[curr_idx]]
+                    n_ctx = self._transform_context(*b_ctx)
+                    
+                    n_latent = self._model_op(context=n_ctx, mode="sampling", n_samples=batch_len)
+                    
+                    self._sample_results[curr_idx][0][:batch_len] = self._inverse_transform_coordinates(*(n_latent.T), *b_ctx)
+                    self._sample_results[curr_idx][1][:batch_len] = ~self._valid_samples(*(n_latent.T), *b_ctx)
+                    
+                    self._compute_ready[curr_idx].record(self._compute_stream)
+
+                if next_start < N:
+                    with torch.cuda.stream(self._transfer_stream):
+                        enqueue_sample_transfer(next_idx, next_start)
+                        self._transfer_ready[next_idx].record(self._transfer_stream)
+
+                with torch.cuda.stream(self._transfer_stream):
+                    self._transfer_stream.wait_event(self._compute_ready[curr_idx])
+                    
+                    result[start:end].copy_(self._sample_results[curr_idx][0][:batch_len], non_blocking=True)
+                    failed_mask[start:end].copy_(self._sample_results[curr_idx][1][:batch_len], non_blocking=True)
+            else:
+
+                #b_ei = energy_keV[start:end].to(self._worker_device)
+                #b_az, b_pol = dir_az[start:end].to(self._worker_device), dir_polar[start:end].to(self._worker_device)
+                
+                #b_az_sc = torch.stack((torch.sin(b_az), torch.cos(b_az)), dim=1)
+                #b_pol_sc = torch.stack((torch.sin(b_pol), torch.cos(b_pol)), dim=1)
+                #b_ctx = torch.cat([
+                #    (b_az_sc + 1) / 2, (b_pol_sc[:, 1:] + 1) / 2, 
+                #    (torch.log10(b_ei) / 2 - 1).unsqueeze(1)
+                #], dim=1).to(torch.float32)
+                
+                b_ctx = [t[start:end].to(self._worker_device) for t in args]
+                n_ctx = self._transform_context(*b_ctx)
+                
+                n_latent = self._model_op(context=b_ctx, mode="sampling", n_samples=batch_len)
+                result[start:end] = self._inverse_transform_coordinates(*(n_latent.T), *b_ctx)
+                failed_mask[start:end] = ~self._valid_samples(*(n_latent.T), *b_ctx)
+
+        if self._is_cuda:
+            torch.cuda.synchronize(self._worker_device)
+
+        if torch.any(failed_mask):
+            result[failed_mask] = self.sample_density(*[t[failed_mask] for t in args])
+
+        return result
+
+    @abstractmethod
+    def _inverse_transform_coordinates(self, *args: torch.Tensor) -> torch.Tensor: ...
+    
+    @abstractmethod
+    def _valid_samples(self, *args: torch.Tensor) -> torch.Tensor: ...
+    
+    @abstractmethod
+    def _transform_context(self, *args: torch.Tensor) -> torch.Tensor: ...
+    
+    @abstractmethod
+    def _transform_coordinates(self, *args: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]: ...
+    
+    @torch.inference_mode()
+    def evaluate_density(self, *args: torch.Tensor) -> torch.Tensor:
+        
+        N = args[0].shape[0]
+        result = torch.empty(N, dtype=torch.float32, device="cpu")
+        
+        if self._is_cuda:
+            result = result.pin_memory()
+            
+            def enqueue_eval_transfer(slot_idx, start_idx):
+                end_idx = min(start_idx + self._batch_size, N)
+                size = end_idx - start_idx
+                for i in range(self.source_dim + self.context_dim):
+                    self._eval_inputs[slot_idx][i][:size].copy_(args[i][start_idx:end_idx], non_blocking=True)
+        
+        if self._is_cuda and N > 0:
+            with torch.cuda.stream(self._transfer_stream):
+                enqueue_eval_transfer(0, 0)
+                self._transfer_ready[0].record(self._transfer_stream)
+        
+        for i, start in enumerate(range(0, N, self._batch_size)):
+            curr_idx = i % 2
+            next_idx = (i + 1) % 2
+            end = min(start + self._batch_size, N)
+            batch_len = end - start
+            next_start = start + self._batch_size
+            
+            if self._is_cuda:
+                with torch.cuda.stream(self._compute_stream):
+                    self._compute_stream.wait_event(self._transfer_ready[curr_idx])
+                    
+                    ctx, src, jac = self._transform_coordinates(*[t[:batch_len] for t in self._eval_inputs[curr_idx]])
+                    
+                    torch.mul(self._model_op(src, ctx, mode="inference"), jac, out=self._eval_results[curr_idx][:batch_len])
+                    
+                    self._compute_ready[curr_idx].record(self._compute_stream)
+
+                if next_start < N:
+                    with torch.cuda.stream(self._transfer_stream):
+                        enqueue_eval_transfer(next_idx, next_start)
+                        
+                        self._transfer_ready[next_idx].record(self._transfer_stream)
+
+                with torch.cuda.stream(self._transfer_stream):
+                    self._transfer_stream.wait_event(self._compute_ready[curr_idx])
+                    
+                    result[start:end].copy_(self._eval_results[curr_idx][:batch_len], non_blocking=True)
+            else:
+                ctx, src, jac = self._transform_coordinates(*[t[start:end].to(self._worker_device) for t in args])
+                result[start:end] = self._model_op(src, ctx, mode="inference") * jac
+
+        if self._is_cuda:
+            torch.cuda.synchronize(self._worker_device)
+        return result
+    
+class RateModel(ABC):
+    def __init__(self, rate_input: Dict):
+        self._unpack_rate_input(rate_input)
+    
+    @property
+    @abstractmethod
+    def context_dim(self) -> int: ...
+    
+    @abstractmethod
+    def _unpack_rate_input(self, rate_input: Dict): ...
+    
+    @abstractmethod
+    def evaluate_rate(self, *args: torch.Tensor) -> torch.Tensor: ...
+    
 
 class DensityApproximation(ABC):
     def __init__(self, major_version: int, density_input: Dict, worker_device: Union[str, int, torch.device], batch_size: int, compile_mode: CompileMode):
@@ -29,8 +402,7 @@ class DensityApproximation(ABC):
         self._setup_model()
     
     @abstractmethod
-    def _setup_model(self):
-        ...
+    def _setup_model(self): ...
     
     def evaluate_density(self, context: torch.Tensor, source: torch.Tensor) -> torch.Tensor:
         dim_context = context.shape[1]
