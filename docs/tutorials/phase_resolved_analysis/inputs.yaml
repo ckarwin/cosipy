@@ -1,0 +1,30 @@
+---
+#----------#
+# Data I/O:
+
+# data files available on the COSI Sharepoint: https://drive.google.com/drive/folders/1UdLfuLp9Fyk4dNussn1wt7WEOsTWrlQ6
+# data_file: "/disk2/abhi/cosipy_pulsar_analysis/crab/Crab_notebook_copy_for_our_data/Crab_DC2_3months_unbinned_data_w_PULSE_PHASE.fits.gz" # full path
+# data_file: "/disk2/abhi/cosipy_pulsar_analysis/crab/Crab_notebook_copy_for_our_data/Crab_AlbedoPhotons_DC3_3months_unbinned_data.fits.gz"
+data_file: "crab_on_pulse_w_albedo.fits"
+ori_file: "20280301_3_month_with_orbital_info.ori" # full path
+unbinned_output: "fits" # 'fits' or 'hdf5'
+time_bins: 3600 # time bin size in seconds. Takes int, float, or list of bin edges.
+energy_bins: [
+    100.,
+    158.489,
+    251.189,
+    398.107,
+    630.957,
+    1000.,
+    1584.89,
+    2511.89,
+    3981.07,
+    6309.57,
+    10000.,
+  ] # Takes list. Needs to match response.
+phi_pix_size: 5 # binning of Compton scattering anlge [deg]
+nside: 8 # healpix binning of psi chi local
+scheme: "ring" # healpix binning of psi chi local
+tmin: 1835478000.0 # Min time cut in seconds.
+tmax: 1836351300.0 # Max time cut in seconds.
+#----------#
