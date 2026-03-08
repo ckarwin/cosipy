@@ -2,6 +2,9 @@ from typing import List, Union, Optional, Literal, Tuple, Dict, Optional, Callab
 from pathlib import Path
 from abc import ABC, abstractmethod
 import numpy as np
+from tqdm.auto import tqdm
+import queue
+import time
 
 
 from importlib.util import find_spec
@@ -187,7 +190,7 @@ class BaseModel(ABC):
 
 class AreaModel(BaseModel):
     @abstractmethod
-    def evaluate_effective_area(self, *args: torch.Tensor) -> torch.Tensor: ...
+    def evaluate_effective_area(self, *args: torch.Tensor, progress_callback: Optional[Callable[[int], None]] = None) -> torch.Tensor: ...
 
 class DensityModel(BaseModel):
     @property
@@ -213,13 +216,16 @@ class DensityModel(BaseModel):
         ]
 
     @torch.inference_mode()
-    def sample_density(self, *args: torch.Tensor) -> torch.Tensor:
+    def sample_density(self, *args: torch.Tensor,
+                       progress_callback: Optional[Callable[[int], None]] = None) -> torch.Tensor:
         N = args[0].shape[0]
         
         result = torch.empty((N, self.source_dim), dtype=torch.float32, device="cpu")
         failed_mask = torch.zeros(N, dtype=torch.bool, device="cpu")
         
         if self._is_cuda:
+            num_batches = (N + self._batch_size - 1) // self._batch_size
+            pending_progress = [torch.cuda.Event() for _ in range(num_batches)]
             result, failed_mask = result.pin_memory(), failed_mask.pin_memory()
             
             def enqueue_sample_transfer(slot_idx, start_idx):
@@ -278,6 +284,8 @@ class DensityModel(BaseModel):
                     
                     result[start:end].copy_(self._sample_results[curr_idx][0][:batch_len], non_blocking=True)
                     failed_mask[start:end].copy_(self._sample_results[curr_idx][1][:batch_len], non_blocking=True)
+                    
+                    pending_progress[i].record(self._transfer_stream)
             else:
 
                 #b_ei = energy_keV[start:end].to(self._worker_device)
@@ -296,12 +304,31 @@ class DensityModel(BaseModel):
                 n_latent = self._model_op(context=b_ctx, mode="sampling", n_samples=batch_len)
                 result[start:end] = self._inverse_transform_coordinates(*(n_latent.T), *b_ctx)
                 failed_mask[start:end] = ~self._valid_samples(*(n_latent.T), *b_ctx)
+                
+                if progress_callback is not None:
+                    amount = batch_len - torch.sum(failed_mask[start:end]).item()
+                    progress_callback(amount)
 
         if self._is_cuda:
+            if progress_callback is not None:
+                i = 0
+                while i < len(pending_progress):
+                    event = pending_progress[i]
+                    if event.query():
+                        start = self._batch_size * i
+                        end = min(start + self._batch_size, N)
+                        num_failed = torch.sum(failed_mask[start:end]).item()
+                        amount = (end - start) - num_failed
+                        if amount > 0:
+                            progress_callback(amount)
+                        
+                        i += 1
+                    else:
+                        time.sleep(0.01)
             torch.cuda.synchronize(self._worker_device)
 
         if torch.any(failed_mask):
-            result[failed_mask] = self.sample_density(*[t[failed_mask] for t in args])
+            result[failed_mask] = self.sample_density(*[t[failed_mask] for t in args], progress_callback=progress_callback)
 
         return result
 
@@ -318,12 +345,15 @@ class DensityModel(BaseModel):
     def _transform_coordinates(self, *args: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]: ...
     
     @torch.inference_mode()
-    def evaluate_density(self, *args: torch.Tensor) -> torch.Tensor:
+    def evaluate_density(self, *args: torch.Tensor,
+                         progress_callback: Optional[Callable[[int], None]] = None) -> torch.Tensor:
         
         N = args[0].shape[0]
         result = torch.empty(N, dtype=torch.float32, device="cpu")
         
         if self._is_cuda:
+            num_batches = (N + self._batch_size - 1) // self._batch_size
+            pending_progress = [torch.cuda.Event() for _ in range(num_batches)]
             result = result.pin_memory()
             
             def enqueue_eval_transfer(slot_idx, start_idx):
@@ -364,11 +394,30 @@ class DensityModel(BaseModel):
                     self._transfer_stream.wait_event(self._compute_ready[curr_idx])
                     
                     result[start:end].copy_(self._eval_results[curr_idx][:batch_len], non_blocking=True)
+                    
+                    pending_progress[i].record(self._transfer_stream)
             else:
                 ctx, src, jac = self._transform_coordinates(*[t[start:end].to(self._worker_device) for t in args])
                 result[start:end] = self._model_op(src, ctx, mode="inference") * jac
+                
+                if progress_callback is not None:
+                    progress_callback(batch_len)
 
         if self._is_cuda:
+            if progress_callback is not None:
+                i = 0
+                while i < len(pending_progress):
+                    event = pending_progress[i]
+                    if event.query():
+                        start = self._batch_size * i
+                        end = min(start + self._batch_size, N)
+                        amount = (end - start)
+                        if amount > 0:
+                            progress_callback(amount)
+                        
+                        i += 1
+                    else:
+                        time.sleep(0.01)
             torch.cuda.synchronize(self._worker_device)
         return result
     
@@ -404,7 +453,8 @@ class DensityApproximation(ABC):
     @abstractmethod
     def _setup_model(self): ...
     
-    def evaluate_density(self, context: torch.Tensor, source: torch.Tensor) -> torch.Tensor:
+    def evaluate_density(self, context: torch.Tensor, source: torch.Tensor,
+                         progress_callback: Optional[Callable[[int], None]] = None) -> torch.Tensor:
         dim_context = context.shape[1]
         dim_source = source.shape[1]
         
@@ -422,9 +472,10 @@ class DensityApproximation(ABC):
         list_context = [context[:, i] for i in range(dim_context)]
         list_source = [source[:, i] for i in range(dim_source)]
         
-        return self._model.evaluate_density(*list_context, *list_source)
+        return self._model.evaluate_density(*list_context, *list_source, progress_callback=progress_callback)
     
-    def sample_density(self, context: torch.Tensor) -> torch.Tensor:
+    def sample_density(self, context: torch.Tensor,
+                       progress_callback: Optional[Callable[[int], None]] = None) -> torch.Tensor:
         dim_context = context.shape[1]
         
         if dim_context != self._expected_context_dim:
@@ -435,7 +486,7 @@ class DensityApproximation(ABC):
             
         list_context = [context[:, i] for i in range(dim_context)]
         
-        return self._model.sample_density(*list_context)
+        return self._model.sample_density(*list_context, progress_callback=progress_callback)
 
 def cuda_cleanup_task(_) -> bool:
     if torch.cuda.is_available():
@@ -450,11 +501,12 @@ def update_density_worker_settings(args: Tuple[str, Union[int, CompileMode]]):
     elif attr == 'density_compile_mode':
         NFWorkerState.density_module._model.compile_mode = value
 
-def init_density_worker(device_queue: mp.Queue, major_version: int,
+def init_density_worker(device_queue: mp.Queue, progress_queue: mp.Queue, major_version: int,
                         density_input: Dict, density_batch_size: int,
                         density_compile_mode: CompileMode, density_approximation: DensityApproximation):
     
     NFWorkerState.worker_device = torch.device(device_queue.get())
+    NFWorkerState.progress_queue = progress_queue
     if NFWorkerState.worker_device.type == 'cuda':
         torch.cuda.set_device(NFWorkerState.worker_device)
     
@@ -469,7 +521,8 @@ def evaluate_density_task(args: Tuple[torch.Tensor, torch.Tensor, torch.Tensor])
         sub_context = sub_context.pin_memory()
         sub_source = sub_source.pin_memory()
     
-    return NFWorkerState.density_module.evaluate_density(sub_context, sub_source)
+    cb = lambda n: NFWorkerState.progress_queue.put(n) if hasattr(NFWorkerState, 'progress_queue') else None
+    return NFWorkerState.density_module.evaluate_density(sub_context, sub_source, progress_callback=cb)
 
 def sample_density_task(args: Tuple[torch.Tensor, torch.Tensor]) -> torch.Tensor:
     context, indices = args
@@ -477,13 +530,14 @@ def sample_density_task(args: Tuple[torch.Tensor, torch.Tensor]) -> torch.Tensor
     sub_context = context[indices, :]
     if torch.device(NFWorkerState.worker_device).type == 'cuda':
         sub_context = sub_context.pin_memory()
-    
-    return NFWorkerState.density_module.sample_density(sub_context)
+        
+    cb = lambda n: NFWorkerState.progress_queue.put(n) if hasattr(NFWorkerState, 'progress_queue') else None
+    return NFWorkerState.density_module.sample_density(sub_context, progress_callback=cb)
 
 class NFBase():
     def __init__(self, path_to_model: Union[str, Path], update_worker, pool_worker, density_batch_size: int = 100_000,
                  devices: Optional[List[Union[str, int, torch.device]]] = None, density_compile_mode: CompileMode = "default",
-                 additional_required_keys: List[str] = None):
+                 additional_required_keys: List[str] = None, show_progress: bool = True):
         self._ckpt = torch.load(str(path_to_model), map_location=torch.device('cpu'), weights_only=False)
         
         required_keys = ['version', 'density_input'] + (additional_required_keys or [])
@@ -505,6 +559,8 @@ class NFBase():
         self._ctx = mp.get_context("spawn")
         self._pool_worker = pool_worker
         self._update_worker = update_worker
+        self.show_progress = show_progress
+        self._progress_queue = None
         
         self.density_batch_size = density_batch_size
         self.density_compile_mode = density_compile_mode
@@ -518,6 +574,16 @@ class NFBase():
             
     def __del__(self):
         self.shutdown_compute_pool()
+        
+    @property
+    def show_progress(self) -> bool:
+        return self._show_progress
+    
+    @show_progress.setter
+    def show_progress(self, value: bool):
+        if not isinstance(value, bool):
+            raise ValueError("show_progress must be a boolean")
+        self._show_progress = value
     
     @property
     def devices(self) -> List[Union[str, int, torch.device]]:
@@ -550,6 +616,9 @@ class NFBase():
         self._update_pool_arguments()
         self._update_worker_config('density_compile_mode', value)
     
+    @property
+    def active_pool(self) -> bool: return self._pool is not None
+    
     def _update_worker_config(self, attr: str, value: Union[int, CompileMode]):
         if self._pool is not None:
             self._pool.map(self._update_worker, [(attr, value)] * self._num_workers)
@@ -574,6 +643,10 @@ class NFBase():
         self._num_workers = 0
         self._pool = None
         self._has_cuda = None
+            
+        self._progress_queue.close()
+        self._progress_queue.join_thread()
+        self._progress_queue = None
     
     def init_compute_pool(self, devices: Optional[List[Union[str, int, torch.device]]]=None):
         active_devices = devices if devices is not None else self._devices
@@ -591,11 +664,12 @@ class NFBase():
         device_queue = self._ctx.Queue()
         for d in active_devices:
             device_queue.put(d)
+        self._progress_queue = self._ctx.Queue()
         
         self._pool = self._ctx.Pool(
             processes=self._num_workers,
             initializer=self._pool_worker,
-            initargs=(device_queue, *self._pool_arguments),
+            initargs=(device_queue, self._progress_queue,*self._pool_arguments),
         )
     
     def sample_density(self, context: torch.Tensor, devices: Optional[List[Union[str, int, torch.device]]]=None) -> torch.Tensor:
@@ -615,9 +689,28 @@ class NFBase():
             indices = torch.tensor_split(torch.arange(n_data), self._num_workers)
             
             tasks = [(context, idx) for idx in indices]
-            results = self._pool.map(sample_density_task, tasks)
             
+            async_result = self._pool.map_async(sample_density_task, tasks)
+            with tqdm(total=n_data, disable=(not self.show_progress), desc="Sampling the density", unit="calls", leave=False) as pbar:
+                while not async_result.ready():
+                    try:
+                        while True:
+                            completed = self._progress_queue.get_nowait()
+                            pbar.update(completed)
+                    except queue.Empty:
+                        async_result.wait(timeout=0.1)
+
+                while not self._progress_queue.empty():
+                    try:
+                        pbar.update(self._progress_queue.get_nowait())
+                    except queue.Empty:
+                        break
+            
+            results = async_result.get()
             return torch.cat(results, dim=0)
+            
+            #results = self._pool.map(sample_density_task, tasks)
+            #return torch.cat(results, dim=0)
 
         finally:
             if temp_pool:
@@ -641,9 +734,28 @@ class NFBase():
             indices = torch.tensor_split(torch.arange(n_data), self._num_workers)
             
             tasks = [(context, source, idx) for idx in indices]
-            results = self._pool.map(evaluate_density_task, tasks)
             
+            async_result = self._pool.map_async(evaluate_density_task, tasks)
+            with tqdm(total=n_data, disable=(not self.show_progress), desc="Evaluating the density", unit="calls", leave=False) as pbar:
+                while not async_result.ready():
+                    try:
+                        while True:
+                            completed = self._progress_queue.get_nowait()
+                            pbar.update(completed)
+                    except queue.Empty:
+                        async_result.wait(timeout=0.1)
+
+                while not self._progress_queue.empty():
+                    try:
+                        pbar.update(self._progress_queue.get_nowait())
+                    except queue.Empty:
+                        break
+            
+            results = async_result.get()
             return torch.cat(results, dim=0)
+            
+            #results = self._pool.map(evaluate_density_task, tasks)
+            #return torch.cat(results, dim=0)
 
         finally:
             if temp_pool:

@@ -1,4 +1,4 @@
-from typing import Iterable
+from typing import Iterable, Optional, List, Union
 
 import numpy as np
 
@@ -27,6 +27,15 @@ class UnpolarizedNFFarFieldInstrumentResponseFunction(FarFieldSpectralInstrument
         if response.is_polarized:
             raise ValueError("The provided NNResponse is polarized, but UnpolarizedNNFarFieldInstrumentResponseFunction only supports unpolarized responses.")
         self._response = response
+    
+    def init_compute_pool(self, devices: Optional[List[Union[str, int, torch.device]]]=None):
+        self._response.init_compute_pool(devices)
+    
+    def shutdown_compute_pool(self):
+        self._response.shutdown_compute_pool()
+    
+    @property
+    def active_pool(self) -> bool: return self._response.active_pool
     
     @staticmethod
     def _get_context(photons: PhotonListWithDirectionAndEnergyInSCFrameInterface):

@@ -1,5 +1,7 @@
-from typing import List, Union, Optional, Dict, Tuple
+from typing import List, Union, Optional, Dict, Tuple, Callable
 from pathlib import Path
+from tqdm.auto import tqdm
+import queue
 
 
 from importlib.util import find_spec
@@ -47,7 +49,8 @@ class AreaApproximation:
             self._model = version_map[self._major_version]
             self._expected_context_dim = self._model.context_dim
     
-    def evaluate_effective_area(self, context: torch.Tensor) -> torch.Tensor:
+    def evaluate_effective_area(self, context: torch.Tensor,
+                                progress_callback: Optional[Callable[[int], None]] = None) -> torch.Tensor:
         dim_context = context.shape[1]
         
         if dim_context != self._expected_context_dim:
@@ -58,7 +61,7 @@ class AreaApproximation:
         
         list_context = [context[:, i] for i in range(dim_context)]
         
-        return self._model.evaluate_effective_area(*list_context)
+        return self._model.evaluate_effective_area(*list_context, progress_callback=progress_callback)
 
 def update_response_worker_settings(args: Tuple[str, Union[int, CompileMode]]):
     update_density_worker_settings(args)
@@ -70,11 +73,11 @@ def update_response_worker_settings(args: Tuple[str, Union[int, CompileMode]]):
     elif attr == 'area_compile_mode':
         NFWorkerState.area_module._model.compile_mode = value
 
-def init_response_worker(device_queue: mp.Queue, major_version: int, area_input: Dict,
+def init_response_worker(device_queue: mp.Queue, progress_queue: mp.Queue, major_version: int, area_input: Dict,
                          density_input: Dict, area_batch_size: int, density_batch_size: int,
                          area_compile_mode: CompileMode, density_compile_mode: CompileMode):
     
-    init_density_worker(device_queue, major_version,
+    init_density_worker(device_queue, progress_queue, major_version,
                         density_input, density_batch_size,
                         density_compile_mode, ResponseDensityApproximation)
     
@@ -88,14 +91,15 @@ def evaluate_area_task(args: Tuple[torch.Tensor, torch.Tensor]) -> torch.Tensor:
     if torch.device(NFWorkerState.worker_device).type == 'cuda':
         sub_context = sub_context.pin_memory()
     
-    return NFWorkerState.area_module.evaluate_effective_area(sub_context)
+    cb = lambda n: NFWorkerState.progress_queue.put(n) if hasattr(NFWorkerState, 'progress_queue') else None
+    return NFWorkerState.area_module.evaluate_effective_area(sub_context, progress_callback=cb)
 
 class NFResponse(NFBase):
     def __init__(self, path_to_model: Union[str, Path], area_batch_size: int = 100_000, density_batch_size: int = 100_000,
-                 devices: Optional[List[Union[str, int, torch.device]]] = None,
-                 area_compile_mode: CompileMode = "max-autotune-no-cudagraphs", density_compile_mode: CompileMode = "default"):
+                 devices: Optional[List[Union[str, int, torch.device]]] = None, area_compile_mode: CompileMode = "max-autotune-no-cudagraphs",
+                 density_compile_mode: CompileMode = "default", show_progress: bool = True):
         
-        super().__init__(path_to_model, update_response_worker_settings, init_response_worker, density_batch_size, devices, density_compile_mode, ['is_polarized', 'area_input'])
+        super().__init__(path_to_model, update_response_worker_settings, init_response_worker, density_batch_size, devices, density_compile_mode, ['is_polarized', 'area_input'], show_progress)
         
         self._is_polarized = self._ckpt['is_polarized']
         self._area_input = self._ckpt['area_input']
@@ -159,9 +163,28 @@ class NFResponse(NFBase):
             indices = torch.tensor_split(torch.arange(n_data), self._num_workers)
             
             tasks = [(context, idx) for idx in indices]
-            results = self._pool.map(evaluate_area_task, tasks)
             
+            async_result = self._pool.map_async(evaluate_area_task, tasks)
+            with tqdm(total=n_data, disable=(not self.show_progress), desc="Evaluating the effective area", unit="calls", leave=False) as pbar:
+                while not async_result.ready():
+                    try:
+                        while True:
+                            completed = self._progress_queue.get_nowait()
+                            pbar.update(completed)
+                    except queue.Empty:
+                        async_result.wait(timeout=0.1)
+
+                while not self._progress_queue.empty():
+                    try:
+                        pbar.update(self._progress_queue.get_nowait())
+                    except queue.Empty:
+                        break
+            
+            results = async_result.get()
             return torch.cat(results, dim=0)
+            
+            #results = self._pool.map(evaluate_area_task, tasks)
+            #return torch.cat(results, dim=0)
 
         finally:
             if temp_pool:
