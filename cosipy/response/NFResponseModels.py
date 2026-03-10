@@ -1,6 +1,5 @@
 import numpy as np
 import healpy as hp
-import time
 
 from typing import Union, Tuple, Dict, Optional, Callable
 
@@ -9,7 +8,6 @@ from importlib.util import find_spec
 
 if any(find_spec(pkg) is None for pkg in ["torch", "normflows", "sphericart.torch"]):
     raise RuntimeError("Install cosipy with [ml] optional package to use this feature.")
-
 
 from .NFBase import CompileMode, build_c_arqs_flow, build_cmlp_diaggaussian_base, NNDensityInferenceWrapper, AreaModel, DensityModel
 import sphericart.torch
@@ -31,15 +29,6 @@ class UnpolarizedAreaSphericalHarmonicsExpansion(AreaModel):
         self._sh_calculator = sphericart.torch.SphericalHarmonics(self._lmax)
         
         return self._horner_eval
-    
-    def _write_gpu_tensors(self):
-        self._gpu_inputs = [
-                (torch.empty(self._batch_size, device=self._worker_device),
-                 torch.empty(self._batch_size, device=self._worker_device),
-                 torch.empty(self._batch_size, device=self._worker_device))
-                for _ in range(2)
-            ]
-        self._gpu_results = [torch.empty(self._batch_size, device=self._worker_device) for _ in range(2)]
     
     @property
     def context_dim(self) -> int:
@@ -90,95 +79,19 @@ class UnpolarizedAreaSphericalHarmonicsExpansion(AreaModel):
                 dir_az[start_idx:end_idx].to(self._worker_device),
                 dir_polar[start_idx:end_idx].to(self._worker_device)
             )
-        
-        if self._is_cuda:
-            num_batches = (N + self._batch_size - 1) // self._batch_size
-            pending_progress = [torch.cuda.Event() for _ in range(num_batches)]
-            ei_norm = ei_norm.pin_memory()
-            result = result.pin_memory()
-            
-            def enqueue_transfer(slot_idx, start_idx):
-                end_idx = min(start_idx + self._batch_size, N)
-                size = end_idx - start_idx
-                self._gpu_inputs[slot_idx][0][:size].copy_(ei_norm[start_idx:end_idx], non_blocking=True)
-                self._gpu_inputs[slot_idx][1][:size].copy_(dir_az[start_idx:end_idx], non_blocking=True)
-                self._gpu_inputs[slot_idx][2][:size].copy_(dir_polar[start_idx:end_idx], non_blocking=True)
          
-        if self._is_cuda and (N > 0):
-            with torch.cuda.stream(self._transfer_stream):
-                enqueue_transfer(0, 0)
-                self._transfer_ready[0].record(self._transfer_stream)
-        
-        torch.cuda.set_sync_debug_mode(1)
-        for i, start in enumerate(range(0, N, self._batch_size)):
-            print(f"Loop: {i}", flush=True)
-            curr_idx = i % 2
-            next_idx = (i + 1) % 2
+        for start in range(0, N, self._batch_size):
             end = min(start + self._batch_size, N)
             batch_len = end - start
-            next_start = start + self._batch_size
             
-            if self._is_cuda:
-                with torch.cuda.stream(self._compute_stream):
-                    self._compute_stream.wait_event(self._transfer_ready[curr_idx])
+            ei_b, az_b, pol_b = get_batch(start)
 
-                    ei_b, az_b, pol_b = [t[:batch_len] for t in self._gpu_inputs[curr_idx]]
-                    t0 = time.time()
-                    poly_b = self._model_op(ei_b)
-                    t1 = time.time()
-                    ylm_b = self._compute_spherical_harmonics(az_b, pol_b)
-                    t2 = time.time()
-                    
-                    torch.sum(poly_b * ylm_b, dim=1, out=self._gpu_results[curr_idx][:batch_len])
-                    t3 = time.time()
-                    self._compute_ready[curr_idx].record(self._compute_stream)
-                    
-                if next_start < N:
-                    with torch.cuda.stream(self._transfer_stream):
-                        t4 = time.time()
-                        enqueue_transfer(next_idx, next_start)
-                        t5 = time.time()
-                        self._transfer_ready[next_idx].record(self._transfer_stream)
-                
-                with torch.cuda.stream(self._transfer_stream):
-                    self._transfer_stream.wait_event(self._compute_ready[curr_idx])
-                    t6 = time.time()
-                    result[start:end].copy_(self._gpu_results[curr_idx][:batch_len], non_blocking=True)
-                    t7 = time.time()
-                    pending_progress[i].record(self._transfer_stream)
-                if i < 5 and self._worker_device == torch.device("cuda:0"):
-                    print(f"Run: {i} on device {self._worker_device}", flush=True)
-                    print(f"model_op: {t1-t0:.5f}s", flush=True)
-                    print(f"spherical_harmonics: {t2-t1:.5f}s", flush=True)
-                    print(f"sum: {t3-t2:.5f}s", flush=True)
-                    print(f"enqueue_transfer: {t5-t4:.5f}s", flush=True)
-                    print(f"result copy: {t7-t6:.5f}s", flush=True)
-            else:
-                ei_b, az_b, pol_b = get_batch(start)
-
-                poly_b = self._model_op(ei_b)
-                ylm_b = self._compute_spherical_harmonics(az_b, pol_b)
-                result[start:end] = torch.sum(poly_b * ylm_b, dim=1)
-                
-                if progress_callback is not None:
-                    progress_callback(batch_len)
-        print("Done", flush=True)
-        if self._is_cuda:
+            poly_b = self._model_op(ei_b)
+            ylm_b = self._compute_spherical_harmonics(az_b, pol_b)
+            result[start:end] = torch.sum(poly_b * ylm_b, dim=1)
+            
             if progress_callback is not None:
-                i = 0
-                while i < len(pending_progress):
-                    event = pending_progress[i]
-                    if event.query():
-                        start = self._batch_size * i
-                        end = min(start + self._batch_size, N)
-                        amount = (end - start)
-                        if amount > 0:
-                            progress_callback(amount)
-                        
-                        i += 1
-                    else:
-                        time.sleep(0.01)
-            torch.cuda.synchronize(self._worker_device)
+                progress_callback(batch_len)
         
         return torch.clamp(result, min=0)
 
@@ -310,8 +223,6 @@ class UnpolarizedDensityCMLPDGaussianCARQSFlow(DensityModel):
         )
 
         jac = 1.0 / (ei * torch.sin(theta_raw + phi) * 4 * np.pi**3)
-        for i in range(torch.sum(torch.isinf(jac))):
-            print("You found a rare event where phi_geo is 0 or 180 degrees!", flush=True)
         jac[torch.isinf(jac)] = 0.0
 
         ctx = self._transform_context(dir_az, dir_pol, ei)

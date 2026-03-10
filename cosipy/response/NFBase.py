@@ -4,7 +4,6 @@ from abc import ABC, abstractmethod
 import numpy as np
 from tqdm.auto import tqdm
 import queue
-import time
 
 
 from importlib.util import find_spec
@@ -133,17 +132,6 @@ class BaseModel(ABC):
         
         self._is_cuda = (self._worker_device.type == 'cuda')
         self.batch_size = batch_size
-        
-        if self._is_cuda:
-            self._compute_stream = torch.cuda.Stream(device=self._worker_device)
-            self._transfer_stream = torch.cuda.Stream(device=self._worker_device)
-            self._transfer_ready = [torch.cuda.Event(), torch.cuda.Event()]
-            self._compute_ready = [torch.cuda.Event(), torch.cuda.Event()]
-        else:
-            self._compute_stream = None
-            self._transfer_stream = None
-            self._transfer_ready = None
-            self._compute_ready = None
     
     @abstractmethod
     def _init_model(self, input: Dict) -> Union[nn.Module, Callable]: ...
@@ -182,11 +170,6 @@ class BaseModel(ABC):
         if not isinstance(value, int) or value <= 0:
             raise ValueError(f"Batch size must be a positive integer, got {value}")
         self._batch_size = value
-        if self._is_cuda:
-            self._write_gpu_tensors()
-    
-    @abstractmethod
-    def _write_gpu_tensors(self): ...
 
 class AreaModel(BaseModel):
     @abstractmethod
@@ -196,24 +179,6 @@ class DensityModel(BaseModel):
     @property
     @abstractmethod
     def source_dim(self) -> int: ...
-    
-    def _write_gpu_tensors(self):
-        self._eval_inputs = [
-            tuple(torch.empty(self._batch_size, device=self._worker_device) for _ in range(self.source_dim + self.context_dim))
-            for _ in range(2)
-        ]
-        self._eval_results = [torch.empty(self._batch_size, device=self._worker_device) for _ in range(2)]
-
-        self._sample_inputs = [
-            tuple(torch.empty(self._batch_size, device=self._worker_device) for _ in range(self.context_dim))
-            for _ in range(2)
-        ]
-
-        self._sample_results = [
-            (torch.empty((self._batch_size, self.source_dim), device=self._worker_device),
-             torch.empty(self._batch_size, dtype=torch.bool, device=self._worker_device))
-            for _ in range(2)
-        ]
 
     @torch.inference_mode()
     def sample_density(self, *args: torch.Tensor,
@@ -223,109 +188,20 @@ class DensityModel(BaseModel):
         result = torch.empty((N, self.source_dim), dtype=torch.float32, device="cpu")
         failed_mask = torch.zeros(N, dtype=torch.bool, device="cpu")
         
-        if self._is_cuda:
-            num_batches = (N + self._batch_size - 1) // self._batch_size
-            pending_progress = [torch.cuda.Event() for _ in range(num_batches)]
-            result, failed_mask = result.pin_memory(), failed_mask.pin_memory()
-            
-            def enqueue_sample_transfer(slot_idx, start_idx):
-                end_idx = min(start_idx + self._batch_size, N)
-                size = end_idx - start_idx
-                for i in range(self.context_dim):
-                    self._sample_inputs[slot_idx][i][:size].copy_(args[i][start_idx:end_idx], non_blocking=True)
-                #self._sample_inputs[slot_idx][0][:size].copy_(energy_keV[start_idx:end_idx], non_blocking=True)
-                #self._sample_inputs[slot_idx][1][:size].copy_(dir_az[start_idx:end_idx], non_blocking=True)
-                #self._sample_inputs[slot_idx][2][:size].copy_(dir_polar[start_idx:end_idx], non_blocking=True)
-        
-        if self._is_cuda and N > 0:
-            with torch.cuda.stream(self._transfer_stream):
-                enqueue_sample_transfer(0, 0)
-                self._transfer_ready[0].record(self._transfer_stream)
-        
-        for i, start in enumerate(range(0, N, self._batch_size)):
-            curr_idx = i % 2
-            next_idx = (i + 1) % 2
+        for start in range(0, N, self._batch_size):
             end = min(start + self._batch_size, N)
             batch_len = end - start
-            next_start = start + self._batch_size
+                
+            b_ctx = [t[start:end].to(self._worker_device) for t in args]
+            n_ctx = self._transform_context(*b_ctx)
             
-            if self._is_cuda:
-                with torch.cuda.stream(self._compute_stream):
-                    self._compute_stream.wait_event(self._transfer_ready[curr_idx])
-                    
-                    #b_ei, b_az, b_pol = [t[:batch_len] for t in self._sample_inputs[curr_idx]]
-                    #
-                    #b_az_sc = torch.stack((torch.sin(b_az), torch.cos(b_az)), dim=1)
-                    #b_pol_sc = torch.stack((torch.sin(b_pol), torch.cos(b_pol)), dim=1)
-                    #
-                    #b_ctx = torch.cat([
-                    #    (b_az_sc + 1) / 2, 
-                    #    (b_pol_sc[:, 1:] + 1) / 2, 
-                    #    (torch.log10(b_ei) / 2 - 1).unsqueeze(1)
-                    #], dim=1).to(torch.float32)
-                    
-                    b_ctx = [t[:batch_len] for t in self._sample_inputs[curr_idx]]
-                    n_ctx = self._transform_context(*b_ctx)
-                    
-                    n_latent = self._model_op(context=n_ctx, mode="sampling", n_samples=batch_len)
-                    
-                    self._sample_results[curr_idx][0][:batch_len] = self._inverse_transform_coordinates(*(n_latent.T), *b_ctx)
-                    self._sample_results[curr_idx][1][:batch_len] = ~self._valid_samples(*(n_latent.T), *b_ctx)
-                    
-                    self._compute_ready[curr_idx].record(self._compute_stream)
-
-                if next_start < N:
-                    with torch.cuda.stream(self._transfer_stream):
-                        enqueue_sample_transfer(next_idx, next_start)
-                        self._transfer_ready[next_idx].record(self._transfer_stream)
-
-                with torch.cuda.stream(self._transfer_stream):
-                    self._transfer_stream.wait_event(self._compute_ready[curr_idx])
-                    
-                    result[start:end].copy_(self._sample_results[curr_idx][0][:batch_len], non_blocking=True)
-                    failed_mask[start:end].copy_(self._sample_results[curr_idx][1][:batch_len], non_blocking=True)
-                    
-                    pending_progress[i].record(self._transfer_stream)
-            else:
-
-                #b_ei = energy_keV[start:end].to(self._worker_device)
-                #b_az, b_pol = dir_az[start:end].to(self._worker_device), dir_polar[start:end].to(self._worker_device)
-                
-                #b_az_sc = torch.stack((torch.sin(b_az), torch.cos(b_az)), dim=1)
-                #b_pol_sc = torch.stack((torch.sin(b_pol), torch.cos(b_pol)), dim=1)
-                #b_ctx = torch.cat([
-                #    (b_az_sc + 1) / 2, (b_pol_sc[:, 1:] + 1) / 2, 
-                #    (torch.log10(b_ei) / 2 - 1).unsqueeze(1)
-                #], dim=1).to(torch.float32)
-                
-                b_ctx = [t[start:end].to(self._worker_device) for t in args]
-                n_ctx = self._transform_context(*b_ctx)
-                
-                n_latent = self._model_op(context=b_ctx, mode="sampling", n_samples=batch_len)
-                result[start:end] = self._inverse_transform_coordinates(*(n_latent.T), *b_ctx)
-                failed_mask[start:end] = ~self._valid_samples(*(n_latent.T), *b_ctx)
-                
-                if progress_callback is not None:
-                    amount = batch_len - torch.sum(failed_mask[start:end]).item()
-                    progress_callback(amount)
-
-        if self._is_cuda:
+            n_latent = self._model_op(context=n_ctx, mode="sampling", n_samples=batch_len)
+            result[start:end] = self._inverse_transform_coordinates(*(n_latent.T), *b_ctx)
+            failed_mask[start:end] = ~self._valid_samples(*(n_latent.T), *b_ctx)
+            
             if progress_callback is not None:
-                i = 0
-                while i < len(pending_progress):
-                    event = pending_progress[i]
-                    if event.query():
-                        start = self._batch_size * i
-                        end = min(start + self._batch_size, N)
-                        num_failed = torch.sum(failed_mask[start:end]).item()
-                        amount = (end - start) - num_failed
-                        if amount > 0:
-                            progress_callback(amount)
-                        
-                        i += 1
-                    else:
-                        time.sleep(0.01)
-            torch.cuda.synchronize(self._worker_device)
+                amount = batch_len - torch.sum(failed_mask[start:end]).item()
+                progress_callback(amount)
 
         if torch.any(failed_mask):
             result[failed_mask] = self.sample_density(*[t[failed_mask] for t in args], progress_callback=progress_callback)
@@ -351,74 +227,16 @@ class DensityModel(BaseModel):
         N = args[0].shape[0]
         result = torch.empty(N, dtype=torch.float32, device="cpu")
         
-        if self._is_cuda:
-            num_batches = (N + self._batch_size - 1) // self._batch_size
-            pending_progress = [torch.cuda.Event() for _ in range(num_batches)]
-            result = result.pin_memory()
-            
-            def enqueue_eval_transfer(slot_idx, start_idx):
-                end_idx = min(start_idx + self._batch_size, N)
-                size = end_idx - start_idx
-                for i in range(self.source_dim + self.context_dim):
-                    self._eval_inputs[slot_idx][i][:size].copy_(args[i][start_idx:end_idx], non_blocking=True)
-        
-        if self._is_cuda and N > 0:
-            with torch.cuda.stream(self._transfer_stream):
-                enqueue_eval_transfer(0, 0)
-                self._transfer_ready[0].record(self._transfer_stream)
-        
-        for i, start in enumerate(range(0, N, self._batch_size)):
-            curr_idx = i % 2
-            next_idx = (i + 1) % 2
+        for start in range(0, N, self._batch_size):
             end = min(start + self._batch_size, N)
             batch_len = end - start
-            next_start = start + self._batch_size
             
-            if self._is_cuda:
-                with torch.cuda.stream(self._compute_stream):
-                    self._compute_stream.wait_event(self._transfer_ready[curr_idx])
-                    
-                    ctx, src, jac = self._transform_coordinates(*[t[:batch_len] for t in self._eval_inputs[curr_idx]])
-                    
-                    torch.mul(self._model_op(src, ctx, mode="inference"), jac, out=self._eval_results[curr_idx][:batch_len])
-                    
-                    self._compute_ready[curr_idx].record(self._compute_stream)
-
-                if next_start < N:
-                    with torch.cuda.stream(self._transfer_stream):
-                        enqueue_eval_transfer(next_idx, next_start)
-                        
-                        self._transfer_ready[next_idx].record(self._transfer_stream)
-
-                with torch.cuda.stream(self._transfer_stream):
-                    self._transfer_stream.wait_event(self._compute_ready[curr_idx])
-                    
-                    result[start:end].copy_(self._eval_results[curr_idx][:batch_len], non_blocking=True)
-                    
-                    pending_progress[i].record(self._transfer_stream)
-            else:
-                ctx, src, jac = self._transform_coordinates(*[t[start:end].to(self._worker_device) for t in args])
-                result[start:end] = self._model_op(src, ctx, mode="inference") * jac
-                
-                if progress_callback is not None:
-                    progress_callback(batch_len)
-
-        if self._is_cuda:
+            ctx, src, jac = self._transform_coordinates(*[t[start:end].to(self._worker_device) for t in args])
+            result[start:end] = self._model_op(src, ctx, mode="inference") * jac
+            
             if progress_callback is not None:
-                i = 0
-                while i < len(pending_progress):
-                    event = pending_progress[i]
-                    if event.query():
-                        start = self._batch_size * i
-                        end = min(start + self._batch_size, N)
-                        amount = (end - start)
-                        if amount > 0:
-                            progress_callback(amount)
-                        
-                        i += 1
-                    else:
-                        time.sleep(0.01)
-            torch.cuda.synchronize(self._worker_device)
+                progress_callback(batch_len)
+
         return result
     
 class RateModel(ABC):
@@ -517,9 +335,6 @@ def evaluate_density_task(args: Tuple[torch.Tensor, torch.Tensor, torch.Tensor])
     
     sub_context = context[indices, :]
     sub_source = source[indices, :]
-    if torch.device(NFWorkerState.worker_device).type == 'cuda':
-        sub_context = sub_context.pin_memory()
-        sub_source = sub_source.pin_memory()
     
     cb = lambda n: NFWorkerState.progress_queue.put(n) if hasattr(NFWorkerState, 'progress_queue') else None
     return NFWorkerState.density_module.evaluate_density(sub_context, sub_source, progress_callback=cb)
@@ -528,8 +343,6 @@ def sample_density_task(args: Tuple[torch.Tensor, torch.Tensor]) -> torch.Tensor
     context, indices = args
     
     sub_context = context[indices, :]
-    if torch.device(NFWorkerState.worker_device).type == 'cuda':
-        sub_context = sub_context.pin_memory()
         
     cb = lambda n: NFWorkerState.progress_queue.put(n) if hasattr(NFWorkerState, 'progress_queue') else None
     return NFWorkerState.density_module.sample_density(sub_context, progress_callback=cb)
@@ -691,7 +504,7 @@ class NFBase():
             tasks = [(context, idx) for idx in indices]
             
             async_result = self._pool.map_async(sample_density_task, tasks)
-            with tqdm(total=n_data, disable=(not self.show_progress), desc="Sampling the density", unit="calls", leave=False) as pbar:
+            with tqdm(total=n_data, disable=(not self.show_progress), desc="Sampling the density", unit="calls", leave=False, smoothing=0.20) as pbar:
                 while not async_result.ready():
                     try:
                         while True:
@@ -708,9 +521,6 @@ class NFBase():
             
             results = async_result.get()
             return torch.cat(results, dim=0)
-            
-            #results = self._pool.map(sample_density_task, tasks)
-            #return torch.cat(results, dim=0)
 
         finally:
             if temp_pool:
@@ -736,7 +546,7 @@ class NFBase():
             tasks = [(context, source, idx) for idx in indices]
             
             async_result = self._pool.map_async(evaluate_density_task, tasks)
-            with tqdm(total=n_data, disable=(not self.show_progress), desc="Evaluating the density", unit="calls", leave=False) as pbar:
+            with tqdm(total=n_data, disable=(not self.show_progress), desc="Evaluating the density", unit="calls", leave=False, smoothing=0.20) as pbar:
                 while not async_result.ready():
                     try:
                         while True:
@@ -753,9 +563,6 @@ class NFBase():
             
             results = async_result.get()
             return torch.cat(results, dim=0)
-            
-            #results = self._pool.map(evaluate_density_task, tasks)
-            #return torch.cat(results, dim=0)
 
         finally:
             if temp_pool:

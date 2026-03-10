@@ -81,21 +81,18 @@ def init_response_worker(device_queue: mp.Queue, progress_queue: mp.Queue, major
                         density_input, density_batch_size,
                         density_compile_mode, ResponseDensityApproximation)
     
-    #NFWorkerState.density_module = ResponseDensityApproximation(major_version, density_input, NFWorkerState.worker_device, density_batch_size, density_compile_mode)
     NFWorkerState.area_module = AreaApproximation(major_version, area_input, NFWorkerState.worker_device, area_batch_size, area_compile_mode)
 
 def evaluate_area_task(args: Tuple[torch.Tensor, torch.Tensor]) -> torch.Tensor:
     context, indices = args
     
     sub_context = context[indices, :]
-    if torch.device(NFWorkerState.worker_device).type == 'cuda':
-        sub_context = sub_context.pin_memory()
     
     cb = lambda n: NFWorkerState.progress_queue.put(n) if hasattr(NFWorkerState, 'progress_queue') else None
     return NFWorkerState.area_module.evaluate_effective_area(sub_context, progress_callback=cb)
 
 class NFResponse(NFBase):
-    def __init__(self, path_to_model: Union[str, Path], area_batch_size: int = 100_000, density_batch_size: int = 100_000,
+    def __init__(self, path_to_model: Union[str, Path], area_batch_size: int = 300_000, density_batch_size: int = 100_000,
                  devices: Optional[List[Union[str, int, torch.device]]] = None, area_compile_mode: CompileMode = "max-autotune-no-cudagraphs",
                  density_compile_mode: CompileMode = "default", show_progress: bool = True):
         
@@ -165,7 +162,7 @@ class NFResponse(NFBase):
             tasks = [(context, idx) for idx in indices]
             
             async_result = self._pool.map_async(evaluate_area_task, tasks)
-            with tqdm(total=n_data, disable=(not self.show_progress), desc="Evaluating the effective area", unit="calls", leave=False) as pbar:
+            with tqdm(total=n_data, disable=(not self.show_progress), desc="Evaluating the effective area", unit="calls", leave=False, smoothing=0.20) as pbar:
                 while not async_result.ready():
                     try:
                         while True:
@@ -182,9 +179,6 @@ class NFResponse(NFBase):
             
             results = async_result.get()
             return torch.cat(results, dim=0)
-            
-            #results = self._pool.map(evaluate_area_task, tasks)
-            #return torch.cat(results, dim=0)
 
         finally:
             if temp_pool:

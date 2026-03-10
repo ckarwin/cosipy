@@ -30,7 +30,7 @@ dependencies = [
 
 [project.optional-dependencies]
 # Machine learning stuff
-ML = ["torch", "torch_geometric"]
+ML = ["torch", "torch_geometric", "normflows", "sphericart[torch]"]
 
 [project.urls]
 Homepage = "https://github.com/cositools/cosipy"
