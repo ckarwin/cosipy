@@ -44,7 +44,7 @@ class PolarizationASAD():
     background : dict or Histogram, or list of same
         Unbinned or binned background model, or list of backgrounds if
         separated in time
-    sc_orientation : cosipy.spacecraftfile.SpacecraftFile.SpacecraftFile
+    sc_orientation : cosipy.spacecraftfile.SpacecraftHistory.SpacecraftHistory
         Spacecraft orientation
     response_file : str or pathlib.Path
         Path to detector response
@@ -307,9 +307,7 @@ class PolarizationASAD():
         if isinstance(self._convention.frame, SpacecraftFrame):
             # source is in spacecraft-local frame
             source = self._source.transform_to('galactic')
-            target_in_sc_frame = self._ori.get_target_in_sc_frame(source)
-            dwell_time_map = self._ori.get_dwell_map(base=self._response,
-                                                     src_path=target_in_sc_frame)
+            dwell_time_map = self._ori.get_dwell_map(source, base=self._response)
             psr = self._response.get_point_source_response(coord=source,
                                                            exposure_map=dwell_time_map)
             psichi_axis = psr.axes['PsiChi']

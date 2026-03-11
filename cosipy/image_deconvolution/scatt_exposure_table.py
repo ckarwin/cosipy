@@ -1,4 +1,5 @@
 import logging
+
 logger = logging.getLogger(__name__)
 
 from tqdm.autonotebook import tqdm
@@ -135,7 +136,7 @@ class SpacecraftAttitudeExposureTable(ExposureTableBase):
         altitude_list = []
                 
         if start is not None and stop is not None:
-            orientation = orientation.source_interval(start, stop)
+            orientation = orientation.select_interval(start, stop)
         elif start is not None:
             logger.error("please specify the stop time")
             return
@@ -143,24 +144,28 @@ class SpacecraftAttitudeExposureTable(ExposureTableBase):
             logger.error("please specify the start time")
             return
         
-        ori_time = orientation.get_time()
+        ori_time = orientation.obstime
             
         logger.info(f'duration: {(ori_time[-1] - ori_time[0]).to("day")}')
         
-        attitude = orientation.get_attitude()[:-1]
+        attitude = orientation.attitude[:-1]
         
         pointing_list = attitude.transform_to("galactic").as_axes()
 
         n_pointing = len(pointing_list[0])
-        
-        l_x = orientation.x_pointings.l.value[:-1]
-        b_x = orientation.x_pointings.b.value[:-1]
 
-        l_z = orientation.z_pointings.l.value[:-1]
-        b_z = orientation.z_pointings.b.value[:-1]
+        x_pointings, _, z_pointings = orientation.attitude.as_axes()
 
-        earth_zenith_l = orientation.earth_zenith.l.value[:-1]
-        earth_zenith_b = orientation.earth_zenith.b.value[:-1]
+        l_x = x_pointings.l.value[:-1]
+        b_x = x_pointings.b.value[:-1]
+
+        l_z = z_pointings.l.value[:-1]
+        b_z = z_pointings.b.value[:-1]
+
+        earth_zenith_coord = orientation.earth_zenith.transform_to('galactic')
+
+        earth_zenith_l = earth_zenith_coord.l.value[:-1]
+        earth_zenith_b = earth_zenith_coord.b.value[:-1]
 
         if scheme == 'ring':
             nest = False
@@ -173,8 +178,8 @@ class SpacecraftAttitudeExposureTable(ExposureTableBase):
         idx_x = hp.ang2pix(nside, l_x, b_x, nest=nest, lonlat=True)
         idx_z = hp.ang2pix(nside, l_z, b_z, nest=nest, lonlat=True)
         
-        livetime = orientation.livetime
-        altitude = orientation.get_altitude()[:-1]
+        livetime = orientation.livetime.to_value(u.s)
+        altitude = orientation.location.spherical.distance[:-1].to_value(u.km)
         
         for i in tqdm(range(n_pointing)):
             

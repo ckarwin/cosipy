@@ -3,8 +3,8 @@ from astropy.coordinates import Angle, SkyCoord
 from astropy import units as u
 from scoords import SpacecraftFrame
 
-from cosipy.polarization.polarization_stokes import PolarizationStokes, rotate_points_to_x_axis
-from cosipy.spacecraftfile import SpacecraftFile
+from cosipy.polarization_fitting.polarization_stokes import PolarizationStokes, rotate_points_to_x_axis
+from cosipy.spacecraftfile import SpacecraftHistory
 from cosipy import UnBinnedData
 from cosipy.threeml.custom_functions import Band_Eflux
 from cosipy import test_data
@@ -12,8 +12,8 @@ from cosipy import test_data
 analysis = UnBinnedData(test_data.path / 'polarization_data.yaml')
 data = analysis.get_dict_from_hdf5(test_data.path / 'polarization_data.hdf5')
 response_path = test_data.path / 'test_polarization_response.h5'
-sc_orientation = SpacecraftFile.open(test_data.path / 'polarization_ori.fits')
-attitude = sc_orientation.get_attitude()[0]
+sc_orientation = SpacecraftHistory.open(test_data.path / 'polarization_ori.fits')
+attitude = sc_orientation.attitude[0]
 
 a = 10. * u.keV
 b = 10000. * u.keV

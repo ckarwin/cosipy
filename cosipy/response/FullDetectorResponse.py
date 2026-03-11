@@ -179,6 +179,10 @@ class FullDetectorResponse(HealpixBase):
         return self._axes
 
     @property
+    def measurement_axes(self):
+        return self.axes['Em', 'Phi', 'PsiChi']
+
+    @property
     def dtype(self):
         """
         Data type returned by to_dt() and slicing

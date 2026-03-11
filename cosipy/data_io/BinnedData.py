@@ -16,6 +16,11 @@ from scoords import SpacecraftFrame
 from cosipy.data_io import UnBinnedData
 
 import logging
+import astropy.units as u
+from astropy.coordinates import SkyCoord
+
+from cosipy.interfaces import BinnedDataInterface
+
 logger = logging.getLogger(__name__)
 
 
@@ -496,3 +501,40 @@ class BinnedData(UnBinnedData):
             d = {"Time[UTC]":self.time_bin_centers,"Rate[ct/s]":self.time_hist/self.time_bin_widths}
             df = pd.DataFrame(data=d)
             df.to_csv(f"{output_name}.dat",index=False,sep="\t",columns=["Time[UTC]","Rate[ct/s]"])
+
+    def get_em_cds(self):
+        return EmCDSBinnedData(self.binned_data.project('Em', 'Phi', 'PsiChi'))
+
+class EmCDSBinnedData(BinnedDataInterface):
+    """
+    Measured energy (Em), Compton polar scattering angle (Phi), and the scattering direction (PsiChi).
+    Phi and PsiChi are the Compton Data Space (CDS). No time dependence
+    """
+    def __init__(self, data:Histogram):
+
+        # Checks
+        if set(data.axes.labels) != {'Em', 'Phi', 'PsiChi'}:
+            raise ValueError(f"Wrong axes. 'Em', 'Psi', 'PsiChi' expected.")
+
+        if not data.axes['Em'].unit.is_equivalent(u.keV):
+            raise ValueError(f"Em axis should have units of energy")
+
+        if not data.axes['Phi'].unit.is_equivalent(u.deg):
+            raise ValueError(f"Psi axis should have angle units")
+
+        if not isinstance(data.axes['PsiChi'],HealpixAxis):
+            raise ValueError(f"PsiChi must be of type {HealpixAxis}.")
+
+        if data.axes['PsiChi'].coordsys is None:
+            raise ValueError(f"PsiChi axes must have a coordinate system.")
+
+        self._data = data
+
+    @property
+    def data(self) -> Histogram:
+        return self._data
+    @property
+    def axes(self) -> Axes:
+        return self._data.axes
+
+

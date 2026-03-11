@@ -458,7 +458,7 @@ class PolarizationStokes():
                 data_ecut_list.append(data_ecut)
             self._data = data_ecut_list
 
-        self._exposure = sc_orientation.get_time_delta().to_value(u.second).sum()
+        self._exposure = sc_orientation.cumulative_livetime().to_value(u.second)
 
         self._data_duration = self.get_data_duration()
 

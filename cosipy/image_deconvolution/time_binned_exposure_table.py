@@ -1,4 +1,7 @@
 import logging
+
+from astropy.time import Time
+
 logger = logging.getLogger(__name__)
 
 from tqdm.autonotebook import tqdm
@@ -97,27 +100,31 @@ class TimeBinnedExposureTable(ExposureTableBase):
 
         for time_binning_index, (tstart, tstop) in enumerate(zip(tstart_list, tstop_list)):
 
-            this_orientation = orientation.source_interval(tstart, tstop)
+            this_orientation = orientation.select_interval(tstart, tstop)
 
             time_binning_indices.append(time_binning_index)
 
-            attitude = this_orientation.get_attitude()[:-1]
+            attitude = this_orientation.attitude[:-1]
         
             pointing_list = attitude.transform_to("galactic").as_axes()
 
             n_pointing = len(pointing_list[0])
-        
-            l_x = this_orientation.x_pointings.l.value[:-1]
-            b_x = this_orientation.x_pointings.b.value[:-1]
 
-            l_z = this_orientation.z_pointings.l.value[:-1]
-            b_z = this_orientation.z_pointings.b.value[:-1]
+            x_pointings, _, z_pointings = this_orientation.attitude.as_axes()
 
-            earth_zenith_l = this_orientation.earth_zenith.l.value[:-1]
-            earth_zenith_b = this_orientation.earth_zenith.b.value[:-1]
+            l_x = x_pointings.l.value[:-1]
+            b_x = x_pointings.b.value[:-1]
 
-            livetime = this_orientation.livetime
-            altitude = this_orientation.get_altitude()[:-1]
+            l_z = z_pointings.l.value[:-1]
+            b_z = z_pointings.b.value[:-1]
+
+            earth_zenith_coord = this_orientation.earth_zenith.transform_to('galactic')
+
+            earth_zenith_l = earth_zenith_coord.l.value[:-1]
+            earth_zenith_b = earth_zenith_coord.b.value[:-1]
+
+            livetime = this_orientation.livetime.to_value(u.s)
+            altitude = this_orientation.location.spherical.distance[:-1].to_value(u.km)
     
             # appending the value
             livetimes.append(livetime)

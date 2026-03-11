@@ -8,11 +8,15 @@ from pytest import raises
 
 rspgz_response_path = test_data.path / "test_full_detector_response.rsp.gz"
 
+rspgz_rel_response_path = test_data.path / "test_full_detector_response_rel.rsp.gz"
+
 rspgz_nonorm_response_path = test_data.path / "test_full_detector_response_no_norm.rsp.gz"
 
 rspgz_mono_nonorm_response_path = test_data.path / "test_full_detector_response_mono_no_norm.rsp.gz"
 
 h5_response_path = test_data.path / "test_full_detector_response.h5"
+
+h5_rel_response_path = test_data.path / "test_full_detector_response_rel.h5"
 
 
 def test_convert_rsp_to_h5(tmp_path):
@@ -76,6 +80,7 @@ def test_convert_rsp_to_h5(tmp_path):
     fdr2.close()
 
     assert h1 == h2
+
 
 def test_default_norms(tmp_path):
 
@@ -227,6 +232,53 @@ def test_convert_h5_to_rsp(tmp_path):
     c.convert_to_rsp(fdr, tmp_rsp_filename, overwrite=True)
 
     tmp_h5_filename = c.convert_to_h5(tmp_rsp_filename, overwrite=True)
+
+    fdr2 = FullDetectorResponse.open(tmp_h5_filename)
+
+    h1 = fdr.to_dr()
+    h2 = fdr2.to_dr()
+
+    fdr.close()
+    fdr2.close()
+
+    assert h1 == h2
+
+
+def test_relative_response(tmp_path):
+
+    tmp_h5_filename = tmp_path / "fdr.h5"
+
+    c = RspConverter(bufsize = 100000)
+
+    # test opening compressed relative .rsp and writing uncompressed .h5
+    c.convert_to_h5(rspgz_rel_response_path,
+                    h5_filename = tmp_h5_filename,
+                    overwrite = True,
+                    compress=False)
+
+    fdr = FullDetectorResponse.open(h5_rel_response_path)
+    fdr2 = FullDetectorResponse.open(tmp_h5_filename)
+
+    h1 = fdr.to_dr()
+    h2 = fdr2.to_dr()
+
+    fdr.close()
+    fdr2.close()
+
+    assert h1 == h2
+
+    tmp_rsp_filename = tmp_path / "fdr.rsp"
+    tmp_rspgz_filename = tmp_path / "fdr.rsp.gz"
+    tmp_h5_filename = tmp_path / "fdr.h5"
+
+    c = RspConverter(bufsize = 100000)
+
+    # test writing compressed .rsp.gz
+    fdr = FullDetectorResponse.open(h5_rel_response_path)
+
+    c.convert_to_rsp(fdr, tmp_rspgz_filename, overwrite=True)
+
+    tmp_h5_filename = c.convert_to_h5(tmp_rspgz_filename, overwrite=True)
 
     fdr2 = FullDetectorResponse.open(tmp_h5_filename)
 

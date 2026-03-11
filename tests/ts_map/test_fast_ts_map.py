@@ -1,3 +1,11 @@
+from cosipy import test_data
+from pytest import approx
+from threeML import Powerlaw
+from cosipy import FastTSMap, SpacecraftHistory
+from histpy import Histogram
+import numpy as np
+from astropy.coordinates import SkyCoord
+import astropy.units as u
 from pathlib import Path
 import os
 
@@ -11,7 +19,7 @@ from threeML import Powerlaw
 from histpy import Histogram
 
 from cosipy import test_data
-from cosipy import FastTSMap, MOCTSMap, SpacecraftFile
+from cosipy import FastTSMap, MOCTSMap, SpacecraftHistory
 
 def test_ts_fit():
 
@@ -20,7 +28,7 @@ def test_ts_fit():
     response_path = test_data.path / "test_full_detector_response.h5"
 
     orientation_path = test_data.path / "20280301_2s.fits"
-    ori = SpacecraftFile.open(orientation_path)
+    ori = SpacecraftHistory.open(orientation_path)
 
     src_bkg = Histogram.open(src_bkg_path).project(['Em', 'PsiChi', 'Phi'])
     bkg = Histogram.open(bkg_path).project(['Em', 'PsiChi', 'Phi'])
@@ -106,7 +114,7 @@ def test_moc_ts_fit():
     response_path = test_data.path / "test_full_detector_response.h5"
 
     orientation_path = test_data.path / "20280301_2s.fits"
-    ori = SpacecraftFile.open(orientation_path)
+    ori = SpacecraftHistory.open(orientation_path)
 
     src_bkg = Histogram.open(src_bkg_path).project(['Em', 'PsiChi', 'Phi'])
     bkg = Histogram.open(bkg_path).project(['Em', 'PsiChi', 'Phi'])

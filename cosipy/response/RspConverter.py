@@ -38,12 +38,22 @@ class RspConverter():
     # map from axis labels in .rsp file to
     # axis labels in HDF5 file
     axis_name_map = {
+        # ground truth axes
         '"Initial energy [keV]"'      : "Ei",
         '"#nu [deg]" "#lambda [deg]"' : "NuLambda",
         '"Polarization Angle [deg]"'  : "Pol",
+
+        # absolute CDS axes
         '"Measured energy [keV]"'     : "Em",
         '"#psi [deg]" "#chi [deg]"'   : "PsiChi",
-        '"#phi [deg]"'                : "Phi",
+        '"#phi [deg]"'                : "Phi",  # used for relative too
+
+        # relative CDS axes
+        '"Epsilon"'                   : "Epsilon",
+        '"#theta [deg]"'              : "Theta",
+        '"#zeta [deg]"'               : "Zeta",
+
+        # other axes
         '"#sigma [deg]" "#tau [deg]"' : "SigmaTau",
         '"Distance [cm]"'             : "Dist"
     }
@@ -51,30 +61,52 @@ class RspConverter():
     # parameters for non-Healpix axes
     # (unit, scale)
     axis_params = {
-        "Ei":       ("keV", "log"),
-        "Pol":      ("deg", "linear"),
-        "Em":       ("keV", "log"),
-        "Phi":      ("deg", "linear"),
-        "Dist":     ("cm", "linear")
+        # ground truth axes
+        "Ei"      : ("keV", "log"),
+        "Pol"     : ("deg", "linear"),
+
+        # absolute CDS axes
+        "Em"      : ("keV", "log"),
+        "Phi"     : ("deg", "linear"), # used for relative too
+
+        # relative CDS axes
+        "Epsilon" :  ("",    "linear"),
+        "Theta"   :  ("deg", "linear"),
+        "Zeta"    :  ("deg", "linear"),
+
+        # other axes
+        "Dist":     ("cm",  "linear")
     }
 
     # textual descriptions of each axis (used for pretty-printing)
     axis_description = {
-        'Ei': "Initial simulated energy",
-        'NuLambda': "Location of the simulated source in the spacecraft coordinates",
-        'Pol': "Polarization angle",
-        'Em': "Measured energy",
-        'PsiChi': "Location in the Compton Data Space",
-        'Phi': "Compton angle",
-        'SigmaTau': "Electron recoil angle",
-        'Dist': "Distance from first interaction"
+        # ground truth axes
+        'Ei'       : "Initial simulated energy",
+        'NuLambda' : "Location of the simulated source in the spacecraft coordinates",
+        'Pol'      : "Polarization angle",
+
+        # absolute CDS axes
+        'Em'       : "Measured energy",
+        'PsiChi'   : "Location in the Compton Data Space",
+        'Phi'      : "Compton angle", # used for relative too
+
+        # relative CDS axes
+        'Epsilon'  : "Relative actual/measured energy discrepancy",
+        'Theta'    : "Energy/Geometric scattering angle discrepancy",
+        'Zeta'     : "Azimuthal angle in plane perpendicular to source direction",
+
+        # other axes
+        'SigmaTau' : "Electron recoil angle",
+        'Dist'     : "Distance from first interaction"
     }
 
     # ordered subset of .rsp axes to keep for HDF5 response
-    fd_axis_order =  ("NuLambda", "Ei", "Pol", "Em", "Phi", "PsiChi")
+    fd_axis_order_abs =  ("NuLambda", "Ei", "Pol", "Em", "Phi", "PsiChi")
+    fd_axis_order_rel =  ("NuLambda", "Ei", "Pol", "Epsilon", "Phi", "Theta", "Zeta")
 
-    # order  of axes expected in .rsp file
-    rsp_axis_order = ("Ei", "NuLambda", "Pol", "Em", "Phi", "PsiChi")
+    # order of axes expected in .rsp file
+    rsp_axis_order_abs = ("Ei", "NuLambda", "Pol", "Em", "Phi", "PsiChi")
+    rsp_axis_order_rel = ("Ei", "NuLambda", "Pol", "Epsilon", "Phi", "Theta", "Zeta")
 
     def __init__(self,
                  norm=None,
@@ -137,6 +169,33 @@ class RspConverter():
         else:
             return open(rsp_filename, mode)
 
+    @staticmethod
+    def get_cds_type(labels):
+        """
+        Determine whether this is an absolute or relative CDS response
+        based on the axis names.  Raise an error if neither the expected
+        absolute or relative CDS axes are present.
+
+        Parameters
+        ----------
+        labels : array-like of str
+          names of response axes
+
+        Returns
+        -------
+        str : one of "absolute" or "relative"
+
+        """
+
+        if all(a in labels for a in ("Epsilon", "Phi", "Theta", "Zeta")):
+            rtype = "relative"
+        elif all(a in labels for a in ("Em", "Phi", "PsiChi")):
+            rtype = "absolute"
+        else:
+            raise ValueError("Unrecognized response type -- not absolute or relative")
+
+        return rtype
+
     def convert_to_h5(self,
                       rsp_filename,
                       h5_filename = None,
@@ -187,7 +246,7 @@ class RspConverter():
         # read all info from the .rsp file
         with self._open_rsp(rsp_filename, "rt") as f:
 
-            axes, hdr = self._read_response_header(f)
+            axes, hdr, fd_axis_order = self._read_response_header(f)
             eff_area = self._get_eff_area_correction(axes, hdr)
 
             if elt_type is None:
@@ -197,7 +256,7 @@ class RspConverter():
             counts = self._read_counts(f, axes, nbins, elt_type)
 
         # reorder the axes as specified for the HDF5 file
-        ax_order = [ ax for ax in RspConverter.fd_axis_order
+        ax_order = [ ax for ax in fd_axis_order
                      if ax in axes.labels ]
         idx_order = axes.label_to_index(ax_order)
         axes = axes[idx_order]
@@ -234,9 +293,10 @@ class RspConverter():
 
         Returns
         -------
-        tuple (axes, hdr)
+        tuple (axes, hdr, fd_axis_order)
           axes -- Axes object containing axes specified in header
           hdr  -- dictionary of additional header information
+          fd_axis_order -- axis ordering for HDF5 file
 
         """
 
@@ -328,7 +388,8 @@ class RspConverter():
                            f"using default: {self.norm} {' '.join(str(x) for x in self.norm_params)}")
 
             hdr["norm"] = self.norm
-            hdr["norm_params"] = self._validate_norm_params(self.norm, self.norm_params)
+            hdr["norm_params"] = self._validate_norm_params(self.norm,
+                                                            self.norm_params)
 
             # add a synthetic SP header matching the default normalization
             if len(hdr["norm_params"]) > 0:
@@ -348,13 +409,20 @@ class RspConverter():
 
         axes_labels = [ RspConverter.axis_name_map[n] for n in axes_names ]
 
+        # Decide whether this is an absolute or relative response
+        if self.get_cds_type(axes_labels) == "relative":
+            fd_axis_order = RspConverter.fd_axis_order_rel
+        else:
+            fd_axis_order = RspConverter.fd_axis_order_abs
+
         # Construct Axes object from specified axes' properties
         axes = []
-        for axis_edges, axis_type, axis_label in zip(axes_edges, axes_types, axes_labels):
+        for axis_edges, axis_type, axis_label in \
+            zip(axes_edges, axes_types, axes_labels):
 
             # skip axes that are not in HDF5 axis order; we assume that
             # these axes are *not* dimeisions of the counts data!
-            if axis_label not in RspConverter.fd_axis_order:
+            if axis_label not in fd_axis_order:
                 continue
 
             if axis_type == 'HEALPix':
@@ -372,11 +440,12 @@ class RspConverter():
                                             label=axis_label))
             else:
                 unit, scale = RspConverter.axis_params[axis_label]
-                axes.append(Axis(edges=axis_edges, unit=unit, scale=scale, label=axis_label))
+                axes.append(Axis(edges=axis_edges, unit=unit,
+                                 scale=scale, label=axis_label))
 
         axes = Axes(axes, copy_axes = False)
 
-        return (axes, hdr)
+        return axes, hdr, fd_axis_order
 
     def _validate_norm_params(self, norm, params):
         """
@@ -897,9 +966,17 @@ class RspConverter():
         if Path(rsp_filename).exists() and not overwrite:
             raise RuntimeError(f"Not overwriting existing file {rsp_filename}")
 
-        # reorder axes if needed to match the expected order for an .rsp file
-        axes = fullDetectorResponse._axes
-        ax_order = [ ax for ax in RspConverter.rsp_axis_order
+        axes = fullDetectorResponse.axes
+
+        # determine if this is an absolute or relative response
+        if self.get_cds_type(axes.labels) == "relative":
+            rsp_axis_order = RspConverter.rsp_axis_order_rel
+        else:
+            rsp_axis_order = RspConverter.rsp_axis_order_abs
+
+        # reorder axes if needed to match the expected order for an
+        # .rsp file
+        ax_order = [ ax for ax in rsp_axis_order
                      if ax in axes.labels ]
         idx_order = axes.label_to_index(ax_order)
 

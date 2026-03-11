@@ -3,7 +3,7 @@ import numpy as np
 
 from cosipy import test_data
 from cosipy.response import FullDetectorResponse
-from cosipy.spacecraftfile import SpacecraftFile
+from cosipy.spacecraftfile import SpacecraftHistory
 from cosipy.image_deconvolution import SpacecraftAttitudeExposureTable
 
 from cosipy.image_deconvolution import CoordsysConversionMatrix
@@ -12,7 +12,7 @@ from cosipy.image_deconvolution import CoordsysConversionMatrix
 #
 #    full_detector_response = FullDetectorResponse.open(test_data.path / "test_full_detector_response.h5")
 #
-#    ori = SpacecraftFile.open(test_data.path / "20280301_first_10sec.fits")
+#    ori = SpacecraftHistory.open(test_data.path / "20280301_first_10sec.fits")
 #
 #    ccm = CoordsysConversionMatrix.time_binning_ccm(full_detector_response, ori, [ori.get_time()[0].value, ori.get_time()[-1].value] * u.s)
 #

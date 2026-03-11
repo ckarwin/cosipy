@@ -23,7 +23,7 @@ class ContinuumEstimation:
         ----------
         ori_file : str
             Full path to orienation file.
-        sc_orientation : cosipy.spacecraftfile.SpacecraftFile
+        sc_orientation : cosipy.spacecraftfile.SpacecraftHistory
             Spacecraft orientation object.  
         detector_response : str
             Full path to detector response file.

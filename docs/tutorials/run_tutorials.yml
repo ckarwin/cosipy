@@ -31,6 +31,8 @@ tutorials:
           unzip: True # Optional. False by default
           #unzip_output: # Optional, if the unzipped file name is different from just removing the .zip or .gz
 
+    test_must_fail_magic:
+       notebook: test/test_must_fail_magic.ipynb
 
     dataIO:
       notebook: DataIO/DataIO_example.ipynb
@@ -45,7 +47,7 @@ tutorials:
       notebook: response/SpacecraftFile.ipynb
       wasabi_files:
         COSI-SMEX/develop/Data/Orientation/20280301_3_month_with_orbital_info.fits:
-          checksum: bf59c4b79bc95ab68bcd376357f7bd40
+          checksum: 5e69bc1d55fab9390f90635690f62896
         COSI-SMEX/develop/Data/Responses/SMEXv12.Continuum.HEALPixO3_10bins_log_flat.binnedimaging.imagingresponse.h5:
           checksum: eb72400a1279325e9404110f909c7785
 
@@ -53,7 +55,7 @@ tutorials:
       notebook: response/DetectorResponse.ipynb
       wasabi_files:
         COSI-SMEX/develop/Data/Orientation/20280301_3_month_with_orbital_info.fits:
-          checksum: bf59c4b79bc95ab68bcd376357f7bd40
+          checksum: 5e69bc1d55fab9390f90635690f62896
         COSI-SMEX/develop/Data/Responses/SMEXv12.Continuum.HEALPixO3_10bins_log_flat.binnedimaging.imagingresponse.h5:
           checksum: eb72400a1279325e9404110f909c7785
 
@@ -65,7 +67,7 @@ tutorials:
         COSI-SMEX/cosipy_tutorials/ts_maps/bkg_binned_data_local.hdf5:
           checksum: b842a7444e6fc1a5dd567b395c36ae7f
         COSI-SMEX/develop/Data/Orientation/20280301_3_month_with_orbital_info.fits:
-          checksum: bf59c4b79bc95ab68bcd376357f7bd40
+          checksum: 5e69bc1d55fab9390f90635690f62896
         COSI-SMEX/cosipy_tutorials/ts_maps/Crab_galactic_CDS_binned.hdf5:
           checksum: 40bdc4bcf4dad040dca3bb0e203aad35
         COSI-SMEX/cosipy_tutorials/ts_maps/Albedo_galactic_CDS_binned.hdf5:
@@ -83,7 +85,7 @@ tutorials:
         - spectral_fits/continuum_fit/grb/grb.yaml
       wasabi_files:
         COSI-SMEX/develop/Data/Orientation/20280301_3_month_with_orbital_info.fits:
-          checksum: bf59c4b79bc95ab68bcd376357f7bd40
+          checksum: 5e69bc1d55fab9390f90635690f62896
         COSI-SMEX/cosipy_tutorials/grb_spectral_fit_local_frame/grb_bkg_binned_data.hdf5:
           checksum: fce391a4b45624b25552c7d111945f60
         COSI-SMEX/cosipy_tutorials/grb_spectral_fit_local_frame/grb_binned_data.hdf5:
@@ -99,16 +101,30 @@ tutorials:
         - spectral_fits/continuum_fit/crab/background.yaml
         - spectral_fits/continuum_fit/crab/crab.yaml
       wasabi_files:
-        COSI-SMEX/develop/Data/Orientation/20280301_3_month_with_orbital_info.fits:
-          checksum: bf59c4b79bc95ab68bcd376357f7bd40
-        COSI-SMEX/cosipy_tutorials/crab_spectral_fit_galactic_frame/crab_bkg_binned_data.hdf5:
-          checksum: 85658e102414c4f746e64a7d29c607a4
-        COSI-SMEX/cosipy_tutorials/crab_spectral_fit_galactic_frame/crab_binned_data.hdf5:
-          checksum: 6e5bccb48556bdbd259519c52dec9dcb
-        COSI-SMEX/cosipy_tutorials/crab_spectral_fit_galactic_frame/bkg_binned_data.hdf5:
-          checksum: 54221d8556eb4ef520ef61da8083e7f4
-        COSI-SMEX/develop/Data/Responses/SMEXv12.Continuum.HEALPixO3_10bins_log_flat.binnedimaging.imagingresponse.h5:
-          checksum: eb72400a1279325e9404110f909c7785
+        COSI-SMEX/develop/Data/Responses/ResponseContinuum.o3.e100_10000.b10log.s10396905069491.m2284.filtered.nonsparse.binnedimaging.imagingresponse.h5:
+          checksum: 7121f094be50e7bfe9b31e53015b0e85
+        COSI-SMEX/DC2/Data/Orientation/20280301_3_month_with_orbital_info.ori:
+          checksum: 416fcc296fc37a056a069378a2d30cb2
+        COSI-SMEX/cosipy_tutorials/crab_spectral_fit_galactic_frame/crab_standard_3months_binned_data_filtered_with_SAAcut.fits.gz.hdf5:
+          checksum: 405862396dea2be79d7892d6d5bb50d8
+        COSI-SMEX/cosipy_tutorials/crab_spectral_fit_galactic_frame/PrimaryProtons_WithDetCstbinned_data_filtered_with_SAAcut.hdf5:
+          checksum: 7597f04210e59340a0888c66fc5cbc63
+        COSI-SMEX/cosipy_tutorials/crab_spectral_fit_galactic_frame/PrimaryAlphas_WithDetCstbinned_data_filtered_with_SAAcut.hdf5:
+          checksum: 76a68da730622851b8e1c749248c3b40
+        COSI-SMEX/cosipy_tutorials/crab_spectral_fit_galactic_frame/AlbedoPhotons_WithDetCstbinned_data_filtered_with_SAAcut.hdf5:
+          checksum: 76c58361d2c9b43b66ef2e41c18939c4
+        COSI-SMEX/cosipy_tutorials/crab_spectral_fit_galactic_frame/AlbedoNeutrons_WithDetCstbinned_data_filtered_with_SAAcut.hdf5:
+          checksum: 8f3cb418c637b839665a4fcbd000d2eb
+        COSI-SMEX/cosipy_tutorials/crab_spectral_fit_galactic_frame/CosmicPhotons_3months_binned_data_filtered_with_SAAcut.hdf5:
+          checksum: 93c4619b383572d318328e6380e35a70
+        COSI-SMEX/cosipy_tutorials/crab_spectral_fit_galactic_frame/GalTotal_SA100_F98_3months_binned_data_filtered_with_SAAcut.hdf5:
+          checksum: d0415d4d04b040af47f23f5d08cb7d64
+        COSI-SMEX/cosipy_tutorials/crab_spectral_fit_galactic_frame/SecondaryPositrons_3months_binned_data_filtered_with_SAAcut.hdf5:
+          checksum: 5fec2212dcdbb4c43c3ac02f02524f68
+        COSI-SMEX/cosipy_tutorials/crab_spectral_fit_galactic_frame/SecondaryProtons_WithDetCstbinned_data_filtered_with_SAAcut.fits.gz.hdf5:
+          checksum: 78aefa46707c98563294a898a62845c1
+        COSI-SMEX/cosipy_tutorials/crab_spectral_fit_galactic_frame/SAA_3months_unbinned_data_filtered_with_SAAcut_statreduced_akaHEPD01result.hdf5:
+          checksum: fc69fbbfd94cd595f57a8b11fc721169
 
     extended_source:
       notebook: spectral_fits/extended_source_fit/diffuse_511_spectral_fit.ipynb
@@ -116,12 +132,12 @@ tutorials:
         - spectral_fits/extended_source_fit/Gal_511.yaml
         - spectral_fits/extended_source_fit/OPsSpectrum.dat
       wasabi_files:
-        COSI-SMEX/develop/Data/Orientation/20280301_3_month_with_orbital_info.fits:
-          checksum: bf59c4b79bc95ab68bcd376357f7bd40
-        COSI-SMEX/DC2/Data/Backgrounds/cosmic_photons_3months_unbinned_data.fits.gz:
-          checksum: faa82255b43d42a2b9c90621fabcb7d6
-        COSI-SMEX/DC2/Data/Sources/511_Testing_3months_unbinned_data.fits.gz:
-          checksum: 34ac3ae76359969e21058d712c8b6684
+        COSI-SMEX/DC2/Data/Orientation/20280301_3_month_with_orbital_info.ori:
+          checksum: 416fcc296fc37a056a069378a2d30cb2
+        #COSI-SMEX/DC2/Data/Backgrounds/cosmic_photons_3months_unbinned_data.fits.gz:
+        #  checksum: faa82255b43d42a2b9c90621fabcb7d6
+        #COSI-SMEX/DC2/Data/Sources/511_Testing_3months_unbinned_data.fits.gz:
+        #  checksum: 34ac3ae76359969e21058d712c8b6684
         COSI-SMEX/develop/Data/Responses/SMEXv12.511keV.HEALPixO4.binnedimaging.imagingresponse.h5:
           checksum: 1fddb86ff5818e16e8c7900c61f17db9
         COSI-SMEX/cosipy_tutorials/extended_source_spectral_fit_galactic_frame/cosmic_photons_binned_data.hdf5:
@@ -166,7 +182,7 @@ tutorials:
 #        COSI-SMEX/DC3/Data/Backgrounds/Ge/AlbedoPhotons_3months_unbinned_data_filtered_with_SAAcut.fits.gz:
 #          checksum: 191a451ee597fd2e4b1cf237fc72e6e2
 #        COSI-SMEX/develop/Data/Orientation/DC3_final_530km_3_month_with_slew_1sbins_GalacticEarth_SAA.fits:
-#          checksum: 29b8eef426efeba9f8cffcac715e94ea
+#          checksum: a9163ab4852c427d09bcfe02df71173a
 
     imaging_511_time_binning:
       notebook:
@@ -182,7 +198,7 @@ tutorials:
         COSI-SMEX/DC3/Data/Backgrounds/Ge/AlbedoPhotons_3months_unbinned_data_filtered_with_SAAcut.fits.gz:
          checksum: 191a451ee597fd2e4b1cf237fc72e6e2
         COSI-SMEX/develop/Data/Orientation/DC3_final_530km_3_month_with_slew_1sbins_GalacticEarth_SAA.fits:
-        checksum: 29b8eef426efeba9f8cffcac715e94ea
+         checksum: a9163ab4852c427d09bcfe02df71173a
 
     source_injector:
       notebook: source_injector/Point_source_injector.ipynb
@@ -192,7 +208,7 @@ tutorials:
         - source_injector/model_injected.h5
       wasabi_files:
         COSI-SMEX/develop/Data/Orientation/20280301_3_month_with_orbital_info.fits:
-          checksum: bf59c4b79bc95ab68bcd376357f7bd40
+          checksum: 5e69bc1d55fab9390f90635690f62896
         COSI-SMEX/cosipy_tutorials/source_injector/crab_3months_unbinned_data.hdf5:
           checksum: 787f17ee7c23e5b94fb77cc52a117422
         COSI-SMEX/develop/Data/Responses/SMEXv12.Continuum.HEALPixO3_10bins_log_flat.binnedimaging.imagingresponse.h5:
@@ -242,7 +258,7 @@ tutorials:
         COSI-SMEX/cosipy_tutorials/polarization_fit/grb_background.fits.gz:
           checksum: 21b1d75891edc6aaf1ff3fe46e91cb49
         COSI-SMEX/develop/Data/Orientation/DC3_final_530km_3_month_with_slew_1sbins_GalacticEarth_SAA.fits:
-          checksum: 29b8eef426efeba9f8cffcac715e94ea
+          checksum: a9163ab4852c427d09bcfe02df71173a
         COSI-SMEX/develop/Data/Responses/ResponseContinuum.o3.pol.e200_10000.b4.p12.relx.s10396905069491.m420.filtered.binnedpolarization.11D.h5:
           checksum: 46b006a6b397fd777dc561d3b028357f
 
@@ -257,7 +273,7 @@ tutorials:
         COSI-SMEX/cosipy_tutorials/polarization_fit/grb_background.fits.gz:
           checksum: 21b1d75891edc6aaf1ff3fe46e91cb49
         COSI-SMEX/develop/Data/Orientation/DC3_final_530km_3_month_with_slew_1sbins_GalacticEarth_SAA.fits:
-          checksum: 29b8eef426efeba9f8cffcac715e94ea
+          checksum: a9163ab4852c427d09bcfe02df71173a
         COSI-SMEX/develop/Data/Responses/ResponseContinuum.o3.pol.e200_10000.b4.p12.relx.s10396905069491.m420.filtered.binnedpolarization.11D.h5:
           checksum: 46b006a6b397fd777dc561d3b028357f
 
@@ -272,7 +288,7 @@ tutorials:
         COSI-SMEX/cosipy_tutorials/polarization_fit/grb_background.fits.gz:
           checksum: 21b1d75891edc6aaf1ff3fe46e91cb49
         COSI-SMEX/develop/Data/Orientation/DC3_final_530km_3_month_with_slew_1sbins_GalacticEarth_SAA.fits:
-          checksum: 29b8eef426efeba9f8cffcac715e94ea
+          checksum: a9163ab4852c427d09bcfe02df71173a
         COSI-SMEX/develop/Data/Responses/ResponseContinuum.o3.pol.e200_10000.b4.p12.relx.s10396905069491.m420.filtered.binnedpolarization.11D.h5:
           checksum: 46b006a6b397fd777dc561d3b028357f
 
@@ -283,18 +299,33 @@ tutorials:
       wasabi_files:
         COSI-SMEX/develop/Data/Orientation/DC3_final_530km_3_month_with_slew_15sbins_GalacticEarth_SAA.fits:
           checksum: 603854cd315ad6e6ff999fa1f55942b6
-          COSI-SMEX/DC3/Data/Backgrounds/Ge/AlbedoPhotons_3months_unbinned_data_filtered_with_SAAcut.fits.gz:
+        COSI-SMEX/DC3/Data/Backgrounds/Ge/AlbedoPhotons_3months_unbinned_data_filtered_with_SAAcut.fits.gz:
           checksum: 191a451ee597fd2e4b1cf237fc72e6e2
         COSI-SMEX/DC3/Data/Sources/GalTotal_SA100_F98_3months_unbinned_data_filtered_with_SAAcut.fits.gz:
           checksum: 9fda5a7b15a90358abc2b886979f9fef
         COSI-SMEX/cosipy_tutorials/galactic_diffuse_continuum/total_healpix_57_SA100_F98_example.gz:
           checksum: 82cbeb9a86d86637f19f31c762f379fc
-        COSI-SMEX/develop/Data/Responses/ResponseContinuum.o3.e100_10000.b10log.s10396905069491.m2284.filtered.nonsparse.binnedimaging.imagingresponse.h5:
-          checksum: 7121f094be50e7bfe9b31e53015b0e85
         COSI-SMEX/DC3/Data/Responses/extended_source_response/extended_source_response_continuum_merged.h5.gz:
           unzip: True
           checksum: 92ed7e22b1dafce6b57611d5cdb6cf70
 
     gti:
       notebook: event_selection/GTI.ipynb
+
+    lightcurves:
+      notebook:
+        - light_curves/speclc_grbdc3_prep.ipynb
+        - light_curves/speclc_grbdc3.ipynb
+      ancillary_files:
+        - light_curves/prep_lctutorial_data.yaml
+      wasabi_files:
+        COSI-SMEX/develop/Data/Responses/ResponseContinuum.o3.e100_10000.b10log.s10396905069491.m2284.filtered.nonsparse.binnedimaging.imagingresponse.h5:
+          checksum: 7121f094be50e7bfe9b31e53015b0e85
+        COSI-SMEX/DC3/Data/Orientation/DC3_final_530km_3_month_with_slew_1sbins_GalacticEarth_SAA.ori:
+          checksum: b87fd41b6c28a5c0c51448ce2964e57c
+        COSI-SMEX/DC3/Data/Sources/GalTotal_SA100_F98_3months_unbinned_data_filtered_with_SAAcut.fits.gz:
+          checksum: 9fda5a7b15a90358abc2b886979f9fef
+        COSI-SMEX/DC3/Data/Sources/GRB_bn081207680_3months_unbinned_data_filtered_with_SAAcut.fits.gz:
+          checksum: 570a0ef083044123a811fb95d803098a
+
 
