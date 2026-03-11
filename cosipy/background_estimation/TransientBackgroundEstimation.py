@@ -1,5 +1,4 @@
 from histpy import Histogram
-from cosipy import SpacecraftFile
 import numpy as np
 import matplotlib.pyplot as plt
 import itertools
