@@ -223,7 +223,7 @@ class UnpolarizedDensityCMLPDGaussianCARQSFlow(DensityModel):
         )
 
         jac = 1.0 / (ei * torch.sin(theta_raw + phi) * 4 * np.pi**3)
-        jac[torch.isinf(jac)] = 0.0
+        jac[torch.isinf(jac) | (jac < 0)] = 0.0
 
         ctx = self._transform_context(dir_az, dir_pol, ei)
 
