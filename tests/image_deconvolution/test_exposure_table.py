@@ -13,13 +13,13 @@ def test_scatt_exposure_table(tmp_path):
 
     nside = 1
 
-    ori = SpacecraftHistory.open(test_data.path / "20280301_first_10sec.ori")
+    ori = SpacecraftHistory.open(test_data.path / "20280301_first_10sec.fits")
 
     assert SpacecraftAttitudeExposureTable.analyze_orientation(ori, nside=nside, start=None, stop=ori.obstime[-1], min_livetime=0, min_num_pointings=1) == None
 
     assert SpacecraftAttitudeExposureTable.analyze_orientation(ori, nside=nside, start=ori.obstime[0], stop=None, min_livetime=0, min_num_pointings=1) == None
 
-    exposure_table = SpacecraftAttitudeExposureTable.from_orientation(ori, nside=nside, 
+    exposure_table = SpacecraftAttitudeExposureTable.from_orientation(ori, nside=nside,
                                                                       start=ori.obstime[0], stop=ori.obstime[-1],
                                                                       min_livetime=0, min_num_pointings=1)
 
@@ -32,7 +32,7 @@ def test_scatt_exposure_table(tmp_path):
                                                                                 min_livetime=0, min_num_pointings=1)
 
     exposure_table.save_as_fits(tmp_path / "exposure_table_test_nside1_ring.fits")
-    
+
     assert exposure_table == SpacecraftAttitudeExposureTable.from_fits(tmp_path / "exposure_table_test_nside1_ring.fits")
 
     map_pointing_zx = exposure_table.calc_pointing_trajectory_map()
@@ -69,7 +69,7 @@ def test_scatt_exposure_table(tmp_path):
     assert np.all(binned_signal.contents == binned_signal_ref.contents)
 
 def test_time_binned_exposure_table(tmp_path):
-    ori = SpacecraftHistory.open(test_data.path / "20280301_first_10sec.ori")
+    ori = SpacecraftHistory.open(test_data.path / "20280301_first_10sec.fits")
 
     tstart_list = Time([1835478000.0], scale='utc', format='unix')
     tstop_list  = Time([1835478005.0], scale='utc', format='unix')

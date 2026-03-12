@@ -42,7 +42,7 @@ def main():
     # fetch_wasabi_file('COSI-SMEX/cosipy_tutorials/grb_spectral_fit_local_frame/grb_bkg_binned_data.hdf5', output=str(data_path / 'grb_bkg_binned_data.hdf5'), checksum = 'fce391a4b45624b25552c7d111945f60')
     # fetch_wasabi_file('COSI-SMEX/cosipy_tutorials/grb_spectral_fit_local_frame/grb_binned_data.hdf5', output=str(data_path / 'grb_binned_data.hdf5'), checksum = 'fcf7022369b6fb378d67b780fc4b5db8')
     # fetch_wasabi_file('COSI-SMEX/cosipy_tutorials/grb_spectral_fit_local_frame/bkg_binned_data_1s_local.hdf5', output=str(data_path / 'bkg_binned_data_1s_local.hdf5'), checksum = 'b842a7444e6fc1a5dd567b395c36ae7f')
-    # fetch_wasabi_file('COSI-SMEX/DC2/Data/Orientation/20280301_3_month_with_orbital_info.ori', output=str(data_path / '20280301_3_month_with_orbital_info.ori'), checksum = '416fcc296fc37a056a069378a2d30cb2')
+    # fetch_wasabi_file('COSI-SMEX/develop/Data/Orientation/20280301_3_month_with_orbital_info.fits', output=str(data_path / '20280301_3_month_with_orbital_info.fits'), checksum = '5e69bc1d55fab9390f90635690f62896')
     # fetch_wasabi_file('COSI-SMEX/DC2/Responses/SMEXv12.Continuum.HEALPixO3_10bins_log_flat.binnedimaging.imagingresponse.nonsparse_nside8.area.good_chunks_unzip.h5.zip', output=str(data_path / 'SMEXv12.Continuum.HEALPixO3_10bins_log_flat.binnedimaging.imagingresponse.nonsparse_nside8.area.good_chunks_unzip.h5.zip'), unzip = True, checksum = 'e8ff763c5d9e63d3797567a4a51d9eda')
 
     dr_path = data_path / "SMEXv12.Continuum.HEALPixO3_10bins_log_flat.binnedimaging.imagingresponse.h5"  # path to detector response
@@ -93,7 +93,7 @@ def main():
 
     tmin = Time(1842597410.0, format='unix')
     tmax = Time(1842597450.0, format='unix')
-    ori = SpacecraftHistory.open(data_path / "20280301_3_month_with_orbital_info.ori", tmin, tmax)
+    ori = SpacecraftHistory.open(data_path / "20280301_3_month_with_orbital_info.fits", tmin, tmax)
     ori = ori.select_interval(tmin, tmax) # Function changed name during refactoring
 
     # Prepare instrument response
@@ -111,7 +111,7 @@ def main():
                                    sc_history=ori,
                                    copy = False)
 
-    instrument_response = BinnedInstrumentResponse(dr)
+    instrument_response = BinnedInstrumentResponse(dr, data)
 
     # Currently using the same NnuLambda, Ei and Pol axes as the underlying FullDetectorResponse,
     # matching the behavior of v0.3. This is all the current BinnedInstrumentResponse can do.

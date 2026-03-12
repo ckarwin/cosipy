@@ -1,4 +1,9 @@
-from ._version import __version__
+try:
+    from importlib import metadata
+    __version__ = metadata.version("cosipy")
+except metadata.PackageNotFoundError:
+    # Handle cases where the package is not installed (e.g., running directly from source)
+    __version__ = "unknown"
 
 from .response import DetectorResponse
 

@@ -4,49 +4,49 @@
 # # Spectral fitting example (Crab)
 
 # **To run this, you need the following files, which can be downloaded using the first few cells of this notebook:**
-# - orientation file (20280301_3_month_with_orbital_info.ori)       
-# - binned data (crab_bkg_binned_data.hdf5, crab_binned_data.hdf5, & bkg_binned_data.hdf5)     
-# - detector response (SMEXv12.Continuum.HEALPixO3_10bins_log_flat.binnedimaging.imagingresponse.h5)     
-# 
+# - orientation file (20280301_3_month_with_orbital_info.fits)
+# - binned data (crab_bkg_binned_data.hdf5, crab_binned_data.hdf5, & bkg_binned_data.hdf5)
+# - detector response (SMEXv12.Continuum.HEALPixO3_10bins_log_flat.binnedimaging.imagingresponse.h5)
+#
 # **The binned data are simulations of the Crab Nebula and albedo photon background produced using the COSI SMEX mass model. The detector response needs to be unzipped before running the notebook.**
 
 # This notebook fits the spectrum of a Crab simulated using MEGAlib and combined with background.
-# 
-# [3ML](https://threeml.readthedocs.io/) is a high-level interface that allows multiple datasets from different instruments to be used coherently to fit the parameters of source model. A source model typically consists of a list of sources with parametrized spectral shapes, sky locations and, for extended sources, shape. Polarization is also possible. A "coherent" analysis, in this context, means that the source model parameters are fitted using all available datasets simultanously, rather than performing individual fits and finding a well-suited common model a posteriori. 
-# 
+#
+# [3ML](https://threeml.readthedocs.io/) is a high-level interface that allows multiple datasets from different instruments to be used coherently to fit the parameters of source model. A source model typically consists of a list of sources with parametrized spectral shapes, sky locations and, for extended sources, shape. Polarization is also possible. A "coherent" analysis, in this context, means that the source model parameters are fitted using all available datasets simultanously, rather than performing individual fits and finding a well-suited common model a posteriori.
+#
 # In order for a dataset to be included in 3ML, each instrument needs to provide a "plugin". Each plugin is responsible for reading the data, convolving the source model (provided by 3ML) with the instrument response, and returning a likelihood. In our case, we'll compute a binned Poisson likelihood:
-# 
+#
 # $$
 # \log \mathcal{L}(\mathbf{x}) = \sum_i \log \frac{\lambda_i(\mathbf{x})^{d_i} \exp (-\lambda_i)}{d_i!}
 # $$
-# 
-# where $d_i$ are the counts on each bin and $\lambda_i$ are the expected counts given a source model with parameters $\mathbf{x}$. 
-# 
+#
+# where $d_i$ are the counts on each bin and $\lambda_i$ are the expected counts given a source model with parameters $\mathbf{x}$.
+#
 # In this example, we will fit a single point source with a known location. We'll assume the background is known and fixed up to a scaling factor. Finally, we will fit a Band function:
-# 
+#
 # $$
 # f(x) = K \begin{cases} \left(\frac{x}{E_{piv}}\right)^{\alpha} \exp \left(-\frac{(2+\alpha)
 #        * x}{x_{p}}\right) & x \leq (\alpha-\beta) \frac{x_{p}}{(\alpha+2)} \\ \left(\frac{x}{E_{piv}}\right)^{\beta}
 #        * \exp (\beta-\alpha)\left[\frac{(\alpha-\beta) x_{p}}{E_{piv}(2+\alpha)}\right]^{\alpha-\beta}
 #        * &x>(\alpha-\beta) \frac{x_{p}}{(\alpha+2)} \end{cases}
 # $$
-# 
+#
 # where $K$ (normalization), $\alpha$ & $\beta$ (spectral indeces), and $x_p$ (peak energy) are the free parameters, while $E_{piv}$ is the pivot energy which is fixed (and arbitrary).
-# 
+#
 # Considering these assumptions:
-# 
+#
 # $$
 # \lambda_i(\mathbf{x}) = B*b_i + s_i(\mathbf{x})
 # $$
-# 
+#
 # where $B*b_i$ are the estimated counts due to background in each bin with $B$ the amplitude and $b_i$ the shape of the background, and $s_i$ are the corresponding expected counts from the source, the goal is then to find the values of $\mathbf{x} = [K, \alpha, \beta, x_p]$ and $B$ that maximize $\mathcal{L}$. These are the best estimations of the parameters.
-# 
+#
 # The final module needs to also fit the time-dependent background, handle multiple point-like and extended sources, as well as all the spectral models supported by 3ML. Eventually, it will also fit the polarization angle. However, this simple example already contains all the necessary pieces to do a fit.
 
 # In[1]:
 
 
-from cosipy import test_data, BinnedData
+from cosipy import BinnedData
 from cosipy.spacecraftfile import SpacecraftHistory
 from cosipy.response.FullDetectorResponse import FullDetectorResponse
 from cosipy.util import fetch_wasabi_file
@@ -59,11 +59,7 @@ from cosipy.data_io import EmCDSBinnedData
 
 import sys
 
-from scoords import SpacecraftFrame
-
-from astropy.time import Time
 import astropy.units as u
-from astropy.coordinates import SkyCoord, Galactic
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -73,7 +69,6 @@ from astromodels import Parameter, Powerlaw
 
 from pathlib import Path
 
-import os
 
 
 def main():
@@ -87,7 +82,7 @@ def main():
     data_path = Path("") # /path/to/files. Current dir by default
 
 
-    # Download the orientation file 
+    # Download the orientation file
 
 
     # In[ ]:
@@ -96,7 +91,7 @@ def main():
     fetch_wasabi_file('COSI-SMEX/DC3/Data/Orientation/DC3_final_530km_3_month_with_slew_15sbins_GalacticEarth_SAA.ori',
                       output=sc_orientation_path, checksum = 'e5e71e3528e39b855b0e4f74a1a2eebe')
 
-    # Download the binned Crab data 
+    # Download the binned Crab data
 
     # In[7]:
 
@@ -115,7 +110,7 @@ def main():
                       "SAAprotons": {'filename': 'SAA_3months_unbinned_data_filtered_with_SAAcut_statreduced_akaHEPD01result.hdf5', 'checksum': 'fc69fbbfd94cd595f57a8b11fc721169'},
                       }
 
-   # Download the binned background data 
+   # Download the binned background data
     for bkg in bkg_components.values():
         wasabi_path = 'COSI-SMEX/cosipy_tutorials/crab_spectral_fit_galactic_frame/'+bkg['filename']
         fetch_wasabi_file(wasabi_path, output=data_path/bkg['filename'], checksum = bkg['checksum'])
@@ -157,9 +152,6 @@ def main():
 
     # ============ Interfaces ==============
 
-    dr = FullDetectorResponse.open(dr_path)
-    instrument_response = BinnedInstrumentResponse(dr)
-
     # Set background parameter, which is used to fit the amplitude of the background, and instantiate the COSI 3ML plugin
 
     # In[8]:
@@ -186,6 +178,9 @@ def main():
     bkg = FreeNormBinnedBackground(bkg_dist,
                                    sc_history=sc_orientation,
                                    copy = False)
+
+    dr = FullDetectorResponse.open(dr_path)
+    instrument_response = BinnedInstrumentResponse(dr, data)
 
     # Currently using the same NnuLambda, Ei and Pol axes as the underlying FullDetectorResponse,
     # matching the behavior of v0.3. This is all the current BinnedInstrumentResponse can do.
@@ -375,7 +370,7 @@ def main():
         binned_energy = np.append(binned_energy, (binned_energy_edges[i+1] + binned_energy_edges[i]) / 2)
         bin_sizes = np.append(bin_sizes, binned_energy_edges[i+1] - binned_energy_edges[i])
 
-    expectation = response.expectation(data, copy = True)
+    expectation = response.expectation(copy = True)
 
 
     # Plot the fitted and injected spectra
@@ -429,7 +424,7 @@ def main():
 
     # In[16]:
 
-    expectation_bkg = bkg.expectation(data.axes, copy = True)
+    expectation_bkg = bkg.expectation(copy = True)
 
     fig,ax = plt.subplots()
 

@@ -120,7 +120,7 @@ class EmCDSEventDataInSCFrameFromArrays(EmCDSEventDataInSCFrameInterface):
         self._energy, self._scatt_angle, self._scatt_lon, self._scatt_lat = np.broadcast_arrays(energy_keV, scatt_angle_rad, scattered_lon_rad_sc, scattered_lat_rad_sc)
 
         if event_id is None:
-            self._id = np.arange(self._jd1.size)
+            self._id = np.arange(self._energy.size)
         else:
             self._id = np.asarray(event_id)
 

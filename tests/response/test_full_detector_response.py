@@ -12,7 +12,7 @@ from cosipy.response import FullDetectorResponse
 from cosipy.spacecraftfile import SpacecraftHistory
 
 response_path = test_data.path / "test_full_detector_response.h5"
-orientation_path = test_data.path / "20280301_first_10sec.ori"
+orientation_path = test_data.path / "20280301_first_10sec.fits"
 
 def test_open():
 

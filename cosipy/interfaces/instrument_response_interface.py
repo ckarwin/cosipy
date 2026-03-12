@@ -29,11 +29,11 @@ from cosipy.response.photon_types import PhotonListWithDirectionAndEnergyInSCFra
 class BinnedInstrumentResponseInterface(BinnedExpectationInterface, Protocol):
 
     def differential_effective_area(self,
-                                    data: BinnedDataInterface,
                                     direction: SkyCoord,
                                     energy:u.Quantity,
                                     polarization:PolarizationAngle,
                                     attitude:Attitude,
+                                    time: Optional[Time],
                                     weight: Union[Quantity, float],
                                     out: Quantity,
                                     add_inplace: bool) -> Quantity:
@@ -41,8 +41,6 @@ class BinnedInstrumentResponseInterface(BinnedExpectationInterface, Protocol):
 
         Parameters
         ----------
-        data:
-            Binned data
         direction:
             Photon incoming direction. If not in a SpacecraftFrame, then provide an attitude for the transformation
         energy:
@@ -52,6 +50,8 @@ class BinnedInstrumentResponseInterface(BinnedExpectationInterface, Protocol):
             SpacecraftFrame, then provide an attitude for the transformation
         attitude
             Attitude defining the orientation of the SC in an inertial coordinate system.
+        time:
+            For time-dependent response
         weight
             Optional. Weighting the result by a given weight. Providing the weight at this point as opposed to
             apply it to the output can result in greater efficiency.

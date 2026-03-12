@@ -24,7 +24,7 @@ def main():
     toy_axis = Axis(np.linspace(-5, 5), label='x')
 
     # Some options
-    unbinned = True     # Binned=False or unbinned=True
+    unbinned = False     # Binned=False or unbinned=True
     plot = True         # Plots the fit
     use_signal = True   # False = bkg-only
     use_bkg = True      # False = signal-only
@@ -55,10 +55,19 @@ def main():
 
     event_data = ToyEventData(data_loader, selector=selector)
 
+    # Data binning true the interface fill() method
+    binned_data = None
+    if plot or not unbinned:
+        binned_data = ToyBinnedData(Histogram(toy_axis))
+        binned_data.fill(event_data)
+
     # This is the expectation from a single source, which is just the standard normal
     # distribution
     # This class handles both the binned and the unbinned case.
-    psr = ToyPointSourceResponse(data = event_data, duration = duration, axis = toy_axis)
+    if unbinned:
+        psr = ToyPointSourceResponse(data = event_data, duration = duration)
+    else:
+        psr = ToyPointSourceResponse(data=binned_data, duration=duration)
 
     # This combines the expectation from multiple
     model_folding = ToyModelFolding(data = event_data, psr = psr)
@@ -90,12 +99,6 @@ def main():
                              spectral_shape=spectrum)
 
     model = Model(source)
-
-    # Data binning true the interface fill() method
-    binned_data = None
-    if plot or not unbinned:
-        binned_data = ToyBinnedData(Histogram(toy_axis))
-        binned_data.fill(event_data)
 
     # Set the likelihood function we'll use
     if unbinned:

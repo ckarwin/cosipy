@@ -36,7 +36,7 @@ class RelativeCDSCoordinates:
             self._representation_type = None
             self._source_vec = source_direction
 
-        self._px, self._py = pol_convention.get_basis_local(source_direction)
+        self._px, self._py = pol_convention.get_basis_local(self._source_vec)
 
     @staticmethod
     def _standardize_angle(angle):

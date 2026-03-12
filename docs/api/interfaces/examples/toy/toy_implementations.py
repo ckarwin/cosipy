@@ -1,5 +1,5 @@
 import itertools
-from typing import Dict, Iterator, Iterable, Optional, Type
+from typing import Dict, Iterator, Iterable, Optional, Type, Union
 
 from astromodels.sources import Source
 import astropy.units as u
@@ -207,10 +207,7 @@ class ToyBkg(BinnedBackgroundInterface, BackgroundDensityInterface):
     def parameters(self) -> Dict[str, u.Quantity]:
         return {'norm': u.Quantity(self._norm, u.Hz)}
 
-    def expectation(self, axes:Axes, copy = True) -> Histogram:
-
-        if axes != self._unit_expectation.axes:
-            raise ValueError("Wrong axes. I have fixed axes.")
+    def expectation(self, copy = True) -> Histogram:
 
         # Always a copy
         return self._unit_expectation * self._norm
@@ -223,12 +220,16 @@ class ToyPointSourceResponse(BinnedThreeMLSourceResponseInterface, UnbinnedThree
 
     event_data_type = ToyEventData
 
-    def __init__(self, data: ToyEventData, duration:Quantity, axis:Axis):
+    def __init__(self, data: Union[ToyEventData, ToyBinnedData], duration:Quantity):
         self._data = data
         self._source = None
         self._duration = duration.to_value(u.s)
-        self._unit_expectation = Histogram(axis,
-                                           contents= self._duration * np.diff(norm.cdf(axis.edges)))
+        self._unit_expectation = Histogram(self.axes,
+                                           contents= self._duration * np.diff(norm.cdf(self.axes[0].edges)))
+
+    @property
+    def axes(self):
+        return self._data.axes
 
     def expected_counts(self) -> float:
 
@@ -259,10 +260,7 @@ class ToyPointSourceResponse(BinnedThreeMLSourceResponseInterface, UnbinnedThree
 
         self._source = source
 
-    def expectation(self, axes:Axes, copy = True) -> Histogram:
-
-        if axes != self._unit_expectation.axes:
-            raise ValueError("Wrong axes. I have fixed axes.")
+    def expectation(self, copy = True) -> Histogram:
 
         if self._source is None:
             raise RuntimeError("Set a source first")
@@ -281,13 +279,17 @@ class ToyModelFolding(BinnedThreeMLModelFoldingInterface, UnbinnedThreeMLModelFo
 
     event_data_type = ToyEventData
 
-    def __init__(self, data:ToyEventData, psr: ToyPointSourceResponse):
+    def __init__(self, data:Union[ToyBinnedData,ToyEventData], psr: ToyPointSourceResponse):
 
         self._data = data
         self._model = None
 
         self._psr = psr
         self._psr_copies = {}
+
+    @property
+    def axes(self):
+        return self._psr.axes
 
     def expected_counts(self) -> float:
 
@@ -330,14 +332,14 @@ class ToyModelFolding(BinnedThreeMLModelFoldingInterface, UnbinnedThreeMLModelFo
 
         self._psr_copies = new_psr_copies
 
-    def expectation(self, axes:Axes, copy = True) -> Histogram:
+    def expectation(self, copy = True) -> Histogram:
 
         self._cache_psr_copies()
 
-        expectation = Histogram(axes)
+        expectation = Histogram(self.axes)
 
         for source_name,psr in self._psr_copies.items():
-            expectation += psr.expectation(axes, copy = False)
+            expectation += psr.expectation(copy = False)
 
         # Always a copy
         return expectation

@@ -167,8 +167,9 @@ class OrthographicConvention(PolarizationConvention):
 
         self._sign = 1 if clockwise else -1
 
+    @property
     def ref_vector(self):
-        return SkyCoord(self._ref_vector, representation_type = 'cartesian', frame = self.frame)
+        return SkyCoord(*self._ref_vector, representation_type = 'cartesian', frame = self.frame)
 
     def __repr__(self):
         return f"<OrthographicConvention(starting from {self.ref_vector} and {'clockwise' if self.is_clockwise else 'counter-clockwise'} when looking at the source)>"

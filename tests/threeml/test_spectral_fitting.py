@@ -17,7 +17,7 @@ from cosipy.statistics import PoissonLikelihood
 
 data_path = test_data.path
 
-sc_orientation = SpacecraftHistory.open(data_path / "20280301_2s.ori")
+sc_orientation = SpacecraftHistory.open(data_path / "20280301_2s.fits")
 dr_path = str(data_path / "test_full_detector_response.h5") # path to detector response
 
 l = 50
@@ -58,9 +58,6 @@ def test_point_source_spectral_fit(background=None):
 
     bkg_rate = np.sum(bkg_dist) / sc_orientation.cumulative_livetime()
 
-    dr = FullDetectorResponse.open(dr_path)
-    instrument_response = BinnedInstrumentResponse(dr)
-
     # Move initial guess slightly away from true values
     spectrum.index.value = index * 1.1
     spectrum.K.value = K.value * 1.1
@@ -69,6 +66,9 @@ def test_point_source_spectral_fit(background=None):
     bkg = FreeNormBinnedBackground(bkg_dist,
                                    sc_history=sc_orientation,
                                    copy=False)
+
+    dr = FullDetectorResponse.open(dr_path)
+    instrument_response = BinnedInstrumentResponse(dr, data)
 
     psr = BinnedThreeMLPointSourceResponse(data=data,
                                            instrument_response=instrument_response,
@@ -157,5 +157,3 @@ def test_point_source_spectral_fit(background=None):
 
     assert np.allclose([cosi.get_log_like()],
                        [TS_ref])
-
-
