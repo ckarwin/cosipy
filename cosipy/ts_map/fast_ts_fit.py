@@ -186,15 +186,13 @@ class FastTSMap():
 
         if self._cds_frame == Frame.LOCAL:
 
-            # convert source direction to path in local frame
-            lons, colats = self._orientation.get_target_in_sc_frame(source)
-
-            # get list of HEALPix pixels with nonzero exposure on path
+            # get list of HEALPix pixels with nonzero exposure of source
             pixels, exposures = \
-                self._orientation.get_exposure(base = self._response,
-                                               theta = colats,
-                                               phi = lons,
-                                               lonlat = False)
+                self._orientation.get_exposure(source = source,
+                                               base = self._response,
+                                               earth_occ = False)
+            exposures = exposures.value
+
         else: # galactic frame
 
             # convert source vector to polar coords
@@ -311,7 +309,15 @@ class FastTSMap():
         data_cds_array, bkg_model_cds_array, psr_cache = \
             self._prepare_inputs(energy_channel, spectrum, max_cache_size)
 
-        hypothesis_coords = self._get_hypothesis_coords(nside)
+        if self._cds_frame == Frame.LOCAL:
+            # compute possible source dirs in same frame
+            # we will use to translate them to local-frame paths
+            hyp_frame = self._orientation.attitude.frame
+        else: # galactic frame
+            hyp_frame = "galactic"
+
+        hypothesis_coords = self._get_hypothesis_coords(nside,
+                                                        coordsys=hyp_frame)
 
         results = [
             self._fit_one_direction(source,
@@ -391,6 +397,9 @@ class FastTSMap():
 
         if save_plot:
             fig.savefig(Path(save_dir)/save_name, dpi = dpi)
+
+        plt.show()
+        plt.close(fig)
 
     @staticmethod
     def get_chi_critical_value(containment = 0.90):

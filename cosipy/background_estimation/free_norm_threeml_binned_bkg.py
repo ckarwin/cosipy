@@ -103,14 +103,14 @@ class FreeNormBackground(BackgroundInterface):
         if self._single_component:
             return {self._default_label: u.Quantity(self._norms[0], u.Hz)}
         else:
-            return {l:u.Quantity(n, u.Hz, copy = False) for l,n in zip(self.labels,self._norms)}
+            return {l:u.Quantity(n, u.Hz, copy = None) for l,n in zip(self.labels,self._norms)}
 
     @property
     def ncomponents(self):
         return len(self._distributions)
 
     @property
-    def meausured_axes(self):
+    def axes(self):
         return self._axes
 
     @property
@@ -137,7 +137,7 @@ class FreeNormBackground(BackgroundInterface):
 
         self._norm = sum(n for n in self._norms)
 
-    def set_parameters(self, **parameters:Dict[str, u.Quantity]) -> None:
+    def set_parameters(self, **parameters:u.Quantity) -> None:
         """
         Same keys as background components
         """
@@ -157,12 +157,11 @@ class FreeNormBinnedBackground(FreeNormBackground, BinnedBackgroundInterface):
         self._expectation = None
         self._last_norm_values = None
 
-    def expectation(self, axes:Axes, copy:bool = True)->Histogram:
+    def expectation(self, copy:bool = True)->Histogram:
         """
 
         Parameters
         ----------
-        axes
         copy:
             If True, it will return an array that the user if free to modify.
             Otherwise, it will result a reference, possible to the cache, that
@@ -173,13 +172,10 @@ class FreeNormBinnedBackground(FreeNormBackground, BinnedBackgroundInterface):
 
         """
 
-        if axes != self.meausured_axes:
-            raise ValueError("Requested axes do not match the background component axes")
-
         # Check if we can use the cache
         if self._expectation is None:
             # First call. Initialize
-            self._expectation = Histogram(self.meausured_axes)
+            self._expectation = Histogram(self.axes)
 
         elif self.norms == self._last_norm_values:
             # No changes. Use cache

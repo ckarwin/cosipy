@@ -1,7 +1,5 @@
 import logging
 
-from setuptools.command.easy_install import easy_install
-
 logger = logging.getLogger(__name__)
 
 from tqdm.autonotebook import tqdm

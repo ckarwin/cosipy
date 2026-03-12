@@ -1,6 +1,7 @@
 import copy
 from typing import Dict
 
+from docutils.io import InputError
 from numba.typed.dictobject import DictModel
 
 from cosipy.interfaces import BinnedThreeMLModelFoldingInterface, BinnedThreeMLSourceResponseInterface, \
@@ -114,6 +115,23 @@ class BinnedThreeMLModelFolding(BinnedThreeMLModelFoldingInterface, ThreeMLModel
         self._psr = point_source_response
         self._esr = extended_source_response
 
+        if point_source_response is None and extended_source_response is None:
+            raise RuntimeError("Provide PSR and/or ESR")
+
+        axes = None
+
+        if point_source_response is not None:
+            axes = point_source_response.axes
+
+        if extended_source_response is not None:
+            if axes is None:
+                axes = extended_source_response.axes
+            else:
+                if axes != extended_source_response.axes:
+                    raise RuntimeError("The PSR and ESR expectation should have the same axes")
+
+        self._axes = axes
+
         # Cache
         # Prevent unnecessary calculations and new memory allocations
         # See this issue for the caveats of comparing models
@@ -121,6 +139,10 @@ class BinnedThreeMLModelFolding(BinnedThreeMLModelFoldingInterface, ThreeMLModel
         self._cached_model_dict = None
         self._source_responses = {}
         self._expectation = Histogram(data.axes)
+
+    @property
+    def axes(self):
+        return self._axes
 
     def set_model(self, model: Model):
         """
@@ -137,7 +159,7 @@ class BinnedThreeMLModelFolding(BinnedThreeMLModelFoldingInterface, ThreeMLModel
 
         self._model = model
 
-    def expectation(self, axes:Axes, copy:bool = True)->Histogram:
+    def expectation(self, copy:bool = True)->Histogram:
         """
 
         Parameters
@@ -166,7 +188,7 @@ class BinnedThreeMLModelFolding(BinnedThreeMLModelFoldingInterface, ThreeMLModel
 
         # Convolve all sources with the response
         for source_name,psr in self._source_responses.items():
-            self._expectation += psr.expectation(axes)
+            self._expectation += psr.expectation()
 
         if copy:
             return self._expectation.copy()

@@ -33,10 +33,11 @@ class PolarizationAngle:
         self._convention = PolarizationConvention.get_convention(convention,
                                                                  *args, **kwargs)
 
-        if source.size > 1:
-            raise ValueError("Only single source location is allowed")
-        elif source.ndim > 0:
-            source = np.ravel(source)[0]
+        if source is not None:
+            if source.size > 1:
+                raise ValueError("Only single source location is allowed")
+            elif source.ndim > 0:
+                source = np.ravel(source)[0]
 
         self._source = source
 

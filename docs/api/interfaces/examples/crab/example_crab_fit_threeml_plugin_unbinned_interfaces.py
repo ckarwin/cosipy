@@ -76,9 +76,9 @@ def main():
         output=str(dr_path),
         checksum='eb72400a1279325e9404110f909c7785')
 
-    sc_orientation_path = data_path / "DC3_final_530km_3_month_with_slew_1sbins_GalacticEarth_SAA.ori"
-    fetch_wasabi_file('COSI-SMEX/DC3/Data/Orientation/DC3_final_530km_3_month_with_slew_1sbins_GalacticEarth_SAA.ori',
-                      output=str(sc_orientation_path), checksum='b87fd41b6c28a5c0c51448ce2964e57c')
+    sc_orientation_path = data_path / "DC3_final_530km_3_month_with_slew_1sbins_GalacticEarth_SAA.fits"
+    fetch_wasabi_file('COSI-SMEX/develop/Data/Orientation/DC3_final_530km_3_month_with_slew_1sbins_GalacticEarth_SAA.fits',
+                      output=str(sc_orientation_path), checksum='a9163ab4852c427d09bcfe02df71173a')
 
     binned_bkg_data_path = data_path / "bkg_binned_data.hdf5"
     fetch_wasabi_file('COSI-SMEX/cosipy_tutorials/crab_spectral_fit_galactic_frame/bkg_binned_data.hdf5',
