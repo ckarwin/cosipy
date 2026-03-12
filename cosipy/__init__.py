@@ -24,3 +24,5 @@ from .source_injector import SourceInjector
 
 from .background_estimation import LineBackgroundEstimation
 from .background_estimation import ContinuumEstimationNN
+from .background_estimation import TransientBackgroundEstimation
+
