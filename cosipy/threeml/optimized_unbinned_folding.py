@@ -43,19 +43,14 @@ class UnbinnedThreeMLPointSourceResponseIRFAdaptive(CachedUnbinnedThreeMLSourceR
                  data: TimeTagEmCDSEventDataInSCFrameInterface,
                  irf: FarFieldSpectralInstrumentResponseFunctionInterface,
                  sc_history: SpacecraftHistory,
-                 show_progress: bool = True):
+                 show_progress: bool = True,
+                 force_energy_node_caching: bool = False):
         
         """
         Will fold the IRF with the point source spectrum by evaluating the IRF at Ei positions adaptively chosen based on characteristic IRF features
         Note that this assumes a smooth flux spectrum
         
         All IRF queries are cached and can be saved to / loaded from a file
-
-        Parameters
-        ----------
-        data
-        irf
-        sc_history
         """
         
         # Interface inputs
@@ -66,6 +61,7 @@ class UnbinnedThreeMLPointSourceResponseIRFAdaptive(CachedUnbinnedThreeMLSourceR
         self._irf = irf
         self._sc_ori = sc_history
         self.show_progress = show_progress
+        self.force_energy_node_caching = force_energy_node_caching
         
         # Default parameters for irf energy node placement
         self._total_energy_nodes = (60, 500)
@@ -143,6 +139,14 @@ class UnbinnedThreeMLPointSourceResponseIRFAdaptive(CachedUnbinnedThreeMLSourceR
         return TimeTagEmCDSEventInSCFrameInterface
     
     @property
+    def force_energy_node_caching(self) -> bool: return self._force_energy_node_caching
+    @force_energy_node_caching.setter
+    def force_energy_node_caching(self, val):
+        if not isinstance(val, bool):
+            raise ValueError("force_energy_node_caching must be a boolean")
+        self._force_energy_node_caching = val
+    
+    @property
     def total_energy_nodes(self) -> Tuple[int, int]: return self._total_energy_nodes
     @total_energy_nodes.setter
     def total_energy_nodes(self, val): self.set_integration_parameters(total_energy_nodes=val)
@@ -174,12 +178,11 @@ class UnbinnedThreeMLPointSourceResponseIRFAdaptive(CachedUnbinnedThreeMLSourceR
     
     @property
     def show_progress(self) -> bool: return self._show_progress
-    
     @show_progress.setter
-    def show_progress(self, value: bool):
-        if not isinstance(value, bool):
+    def show_progress(self, val: bool):
+        if not isinstance(val, bool):
             raise ValueError("show_progress must be a boolean")
-        self._show_progress = value
+        self._show_progress = val
     
     def set_integration_parameters(self,
                                    total_energy_nodes: Optional[Tuple[int, int]] = None,
@@ -613,6 +616,15 @@ class UnbinnedThreeMLPointSourceResponseIRFAdaptive(CachedUnbinnedThreeMLSourceR
         
         return phi_geo_rad, np.pi - phi_geo_rad
     
+    def _compute_nodes(self):
+        sc_coord_sph = self._sc_coord_sph_cache
+        
+        lon_ph_rad = asarray(sc_coord_sph.lon.rad, dtype=np.float32)
+        lat_ph_rad = asarray(sc_coord_sph.lat.rad, dtype=np.float32)
+        
+        phi_geo_rad, phi_igeo_rad = self._get_CDS_coordinates(torch.as_tensor(lon_ph_rad), torch.as_tensor(lat_ph_rad))
+        self._irf_energy_node_cache = np.asarray(self._get_nodes(self._energy_m_keV, self._phi_rad, phi_geo_rad, phi_igeo_rad)[0])
+    
     def _compute_density(self):
         coord = self._source.position.sky_coord
         sc_coord_sph = self._sc_coord_sph_cache
@@ -636,6 +648,9 @@ class UnbinnedThreeMLPointSourceResponseIRFAdaptive(CachedUnbinnedThreeMLSourceR
         batch_lon_scatt_buffer = np.empty(buffer_size, dtype=np.float32)
         batch_lat_scatt_buffer = np.empty(buffer_size, dtype=np.float32)
         
+        if (batch_size_events < self._n_events) & (self._force_energy_node_caching):
+            self._irf_energy_node_cache = np.empty((self._n_events, n_energy), dtype=np.float32)
+        
         for i in tqdm(range(0, self._n_events, batch_size_events), 
                       disable=(not self.show_progress),
                       desc="Caching the response", 
@@ -654,7 +669,9 @@ class UnbinnedThreeMLPointSourceResponseIRFAdaptive(CachedUnbinnedThreeMLSourceR
             nodes, weights = self._get_nodes(e_sl, p_sl, pg_sl, pig_sl)
 
             if batch_size_events >= self._n_events:
-                 self._irf_energy_node_cache = np.asarray(nodes)
+                self._irf_energy_node_cache = np.asarray(nodes)
+            else:
+                self._irf_energy_node_cache[start:end] = np.asarray(nodes)
             
             batch_lon_src_buffer[:current_total].reshape(current_n, n_energy)[:] = lon_ph_rad[start:end, np.newaxis]
             batch_lat_src_buffer[:current_total].reshape(current_n, n_energy)[:] = lat_ph_rad[start:end, np.newaxis]
@@ -722,6 +739,9 @@ class UnbinnedThreeMLPointSourceResponseIRFAdaptive(CachedUnbinnedThreeMLSourceR
                 if not active_pool:
                     self._irf.init_compute_pool()
             
+            if source_coord != self._last_convolved_source_skycoord:
+                self._irf_energy_node_cache = None
+            
             if area_recalculation:
                 self._compute_area()
                 
@@ -733,6 +753,13 @@ class UnbinnedThreeMLPointSourceResponseIRFAdaptive(CachedUnbinnedThreeMLSourceR
                 self._irf.shutdown_compute_pool()
             
             self._last_convolved_source_skycoord = source_coord.copy()
+        
+        node_caching = (self.force_energy_node_caching
+                        and
+                        self._irf_energy_node_cache is None)
+        
+        if node_caching:
+            self._compute_nodes()
     
     def cache_to_file(self, filename: Union[str, Path]):
         with h5py.File(str(filename), 'w') as f:
@@ -741,6 +768,8 @@ class UnbinnedThreeMLPointSourceResponseIRFAdaptive(CachedUnbinnedThreeMLSourceR
             f.attrs['peak_widths'] = self._peak_widths
             f.attrs['energy_range'] = self._energy_range
             f.attrs['batch_size'] = self._batch_size
+            f.attrs['show_progress'] = self._show_progress
+            f.attrs['force_energy_node_caching'] = self._force_energy_node_caching
             
             if self._offset is not None:
                 f.attrs['offset'] = self._offset
@@ -794,6 +823,8 @@ class UnbinnedThreeMLPointSourceResponseIRFAdaptive(CachedUnbinnedThreeMLSourceR
             self._peak_widths = tuple(f.attrs['peak_widths'])
             self._energy_range = tuple(f.attrs['energy_range'])
             self._batch_size = int(f.attrs['batch_size'])
+            self._show_progress = bool(f.attrs['show_progress'])
+            self._force_energy_node_caching = bool(f.attrs['force_energy_node_caching'])
             
             if 'offset' in f.attrs:
                 self._offset = f.attrs['offset']
@@ -879,7 +910,10 @@ class UnbinnedThreeMLPointSourceResponseIRFAdaptive(CachedUnbinnedThreeMLSourceR
             self._exp_density = torch.zeros(self._n_events, dtype=self._irf_cache.dtype)
 
             if self._irf_energy_node_cache is not None:
-                flux = torch.as_tensor(self._source(self._irf_energy_node_cache), dtype=self._irf_cache.dtype)
+                flux = torch.as_tensor(
+                    self._source(self._irf_energy_node_cache.ravel()),
+                    dtype=self._irf_cache.dtype
+                ).view(self._irf_energy_node_cache.shape)
 
                 torch.linalg.vecdot(self._irf_cache, flux, dim=1, out=self._exp_density)
 
@@ -904,7 +938,10 @@ class UnbinnedThreeMLPointSourceResponseIRFAdaptive(CachedUnbinnedThreeMLSourceR
 
                     nodes, _ = self._get_nodes(e_sl, p_sl, pg_sl, pig_sl)
 
-                    flux_batch = torch.as_tensor(self._source(np.asarray(nodes)), dtype=self._irf_cache.dtype)
+                    flux_batch = torch.as_tensor(
+                        self._source(np.asarray(nodes).ravel()),
+                        dtype=self._irf_cache.dtype
+                    ).view(nodes.shape)
                     
                     torch.linalg.vecdot(self._irf_cache[i:end], flux_batch, dim=1, out=self._exp_density[i:end])
             
