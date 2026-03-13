@@ -67,9 +67,9 @@ def init_background_worker(device_queue: mp.Queue, progress_queue: mp.Queue, maj
                         density_compile_mode, BackgroundDensityApproximation)
 
 class NFBackground(NFBase):
-    def __init__(self, path_to_model: Union[str, Path],
+    def __init__(self, path_to_model: Union[str, Path], density_batch_size: int = 100_000,
                  devices: Optional[List[Union[str, int, torch.device]]] = None,
-                 density_batch_size: int = 100_000, density_compile_mode: CompileMode = "default", show_progress: bool = True):
+                 density_compile_mode: CompileMode = "default", show_progress: bool = True):
         
         super().__init__(path_to_model, update_density_worker_settings, init_background_worker, density_batch_size, devices, density_compile_mode, ['rate_input'], show_progress)
         
