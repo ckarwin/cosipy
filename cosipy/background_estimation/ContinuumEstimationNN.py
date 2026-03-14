@@ -353,13 +353,13 @@ class ContinuumEstimationNN():
         """
      
         # Add graceful exit for now since unet is not fully supported:
-        if model_type == "unet":
-            if nn_model in ["load", "load_full"]:
-                logger.error("load model not supported for unet.")
-                raise RuntimeError("load model not supported for unet.")
-            if device == "mac":
-                logger.error("unet not fully supported on macs.")
-                raise RuntimeError("unet not fully supported on macs.")
+        #if model_type == "unet":
+        #    if nn_model in ["load", "load_full"]:
+        #        logger.error("load model not supported for unet.")
+        #        raise RuntimeError("load model not supported for unet.")
+        #    if device == "mac":
+        #        logger.error("unet not fully supported on macs.")
+        #        raise RuntimeError("unet not fully supported on macs.")
             
         # Initiate device, either CPU or GPU if available. 
         self.device = self.select_device()
