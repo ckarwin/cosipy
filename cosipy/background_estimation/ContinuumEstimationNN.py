@@ -151,7 +151,7 @@ class ContinuumEstimationNN():
         
         # For Mac M chips:
         elif torch.backends.mps.is_available():
-            return torch.device('mps')
+            return torch.device('cpu')
 
         else:
             logger.info("No GPU detected. Using CPU.")
