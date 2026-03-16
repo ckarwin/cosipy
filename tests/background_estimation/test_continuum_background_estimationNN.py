@@ -40,13 +40,6 @@ def test_continuum_background_estimation(tmp_path,monkeypatch):
     instance.estimate_bg(input_data, psr_file, background_model=input_data,
         training_mode="hybrid", containment=0.6, epochs=1, em_bin=1, phi_bin=1)
     
-    #instance.estimate_bg(input_data, psr_file, background_model=input_data,
-    #    training_mode="hybrid", containment=0.6, epochs=1, model_type="unet",em_bin=1, phi_bin=1)
-     
-    #instance.estimate_bg(input_data, psr_file, background_model=input_data,
-    #    training_mode="hybrid", evaluate_only=True, inpainted_file=input_data,
-    #    containment=0.6, epochs=1, model_type="unet",em_bin=1, phi_bin=1)
-
     instance.plot_training_loss("inpainting_nn_model_training_loss.npy",1,"training_loss",show_plot=False)
 
     # Test simple inpainging method:
