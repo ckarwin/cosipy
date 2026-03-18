@@ -1,10 +1,12 @@
 import itertools
 import logging
 import operator
+from typing import Optional
 
 from cosipy import UnBinnedData
 from cosipy.interfaces.expectation_interface import ExpectationInterface, ExpectationDensityInterface
 from cosipy.util.iterables import itertools_batched
+from cosipy.util.iterables import asarray
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +26,7 @@ __all__ = ['UnbinnedLikelihood',
 class UnbinnedLikelihood(UnbinnedLikelihoodInterface):
     def __init__(self,
                  expectation:ExpectationDensityInterface,
-                 batch_size:int = 100000):
+                 batch_size: Optional[int] = 100000):
         """
         Will get the number of events from the response and bkg expectation_density iterators
 
@@ -62,16 +64,20 @@ class UnbinnedLikelihood(UnbinnedLikelihoodInterface):
         nobservations = 0
         density_log_sum = 0
 
-        for density_iter_chunk in itertools_batched(self._expectation.expectation_density(), self._batch_size):
+        if self._batch_size is None:
+            chunks = [self._expectation.expectation_density()]
+        else:
+            chunks = itertools_batched(self._expectation.expectation_density(), self._batch_size)
+            
+        for chunk in chunks:
+            density = asarray(chunk, dtype=np.float64)
 
-            density = np.fromiter(density_iter_chunk, dtype=float)
-
-            if np.any(density == 0):
-                # np.log(0) = -inf for any event, no need to keep iterationg
+            # We don't have to continue
+            if density.min() <= 0.0:
                 return -np.inf
 
-            density_log_sum += np.sum(np.log(density))
             nobservations += density.size
+            density_log_sum += np.sum(np.log(density))
 
         self._nobservations = nobservations
 
