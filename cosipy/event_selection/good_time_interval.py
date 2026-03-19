@@ -177,7 +177,7 @@ class GoodTimeInterval():
     def from_pointing_cut(cls,
                           target_coord,
                           sc_history,
-                          max_offaxis,
+                          max_offaxis_deg,
                           earth_occ = False):
         """
         Build a GTI where a fixed sky position is within a maximum off-axis angle of the spacecraft boresight.
@@ -188,8 +188,8 @@ class GoodTimeInterval():
             Fixed target (source) position.
         sc_history : cosipy.spacecraftfile.SpacecraftHistory
             Spacecraft pointinghistory to evaluate (.ori file).
-        max_offaxis : astropy.units.Quantity or float
-            Maximum allowed off-axis angle (FOV). If unitless, interpreted as degrees.
+        max_offaxis_deg : astropy.units.Quantity
+            Maximum allowed off-axis angle (FOV).
         earth_occ : bool, optional
             If True, exclude time bins in which the target is occulted
             by the Earth. Default is False.
@@ -202,14 +202,14 @@ class GoodTimeInterval():
 
         if not isinstance(target_coord, SkyCoord):
             raise TypeError("target_coord must be an astropy.coordinates.SkyCoord")
-
-        max_offaxis = u.Quantity(max_offaxis, u.deg)
+        if not isinstance(max_offaxis_deg, u.Quantity):
+            raise TypeError("max_offaxis_deg must be an astropy.units.Quantity")
 
         source_sc = target_coord.transform_to(sc_history.attitude.frame)
         source_sc = source_sc.cartesian.xyz.value
 
         _, colatitude = sc_history._get_target_in_sc_frame(source_sc)
-        in_fov = colatitude[:-1] <= max_offaxis.to_value(u.rad)
+        in_fov = colatitude[:-1] <= max_offaxis_deg.to_value(u.rad)
 
         if earth_occ:
             source_gcrs = target_coord.transform_to(sc_history.location)
