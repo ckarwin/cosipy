@@ -25,15 +25,22 @@ __all__ = ['UnbinnedLikelihood',
 
 class UnbinnedLikelihood(UnbinnedLikelihoodInterface):
     def __init__(self,
-                 expectation:ExpectationDensityInterface,
-                 batch_size: Optional[int] = 100000):
+                 expectation: ExpectationDensityInterface,
+                 batch_size: Optional[int] = None):
         """
-        Will get the number of events from the response and bkg expectation_density iterators
-
         Parameters
         ----------
-        response
-        bkg
+        expectation : ExpectationDensityInterface
+            Object that provides the expected counts and the
+            ``expectation_density()`` iterator used to compute the likelihood.
+
+        batch_size : int or None, optional
+            Number of density values to process at a time in ``get_log_like()``.
+            If None, all values are processed in a single batch.
+
+            This parameter only affects iteration when the expectation density
+            is provided as a generator/iterator. If it is already a sized or
+            in-memory object, batching is not applied.
         """
 
         self._expectation = expectation
@@ -63,11 +70,13 @@ class UnbinnedLikelihood(UnbinnedLikelihoodInterface):
         # Based on the system
         nobservations = 0
         density_log_sum = 0
+        
+        expectation_density = self._expectation.expectation_density()
 
-        if self._batch_size is None:
-            chunks = [self._expectation.expectation_density()]
+        if (self._batch_size is None) or (hasattr(expectation_density, "__len__")):
+            chunks = [expectation_density]
         else:
-            chunks = itertools_batched(self._expectation.expectation_density(), self._batch_size)
+            chunks = itertools_batched(expectation_density, self._batch_size)
             
         for chunk in chunks:
             density = asarray(chunk, dtype=np.float64)
