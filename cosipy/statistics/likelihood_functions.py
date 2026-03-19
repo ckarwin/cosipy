@@ -39,8 +39,8 @@ class UnbinnedLikelihood(UnbinnedLikelihoodInterface):
             If None, all values are processed in a single batch.
 
             This parameter only affects iteration when the expectation density
-            is provided as a generator/iterator. If it is already a sized or
-            in-memory object, batching is not applied.
+            is provided as an iterator that is not a numpy array. If it is already
+            an array batching is not applied.
         """
 
         self._expectation = expectation
@@ -73,13 +73,13 @@ class UnbinnedLikelihood(UnbinnedLikelihoodInterface):
         
         expectation_density = self._expectation.expectation_density()
 
-        if (self._batch_size is None) or (hasattr(expectation_density, "__len__")):
+        if (self._batch_size is None) or isinstance(expectation_density, np.ndarray):
             chunks = [expectation_density]
         else:
             chunks = itertools_batched(expectation_density, self._batch_size)
             
         for chunk in chunks:
-            density = asarray(chunk, dtype=np.float64)
+            density = asarray(chunk, dtype=np.float64, force_dtype=False)
 
             # We don't have to continue
             if density.min() <= 0.0:
