@@ -9,12 +9,14 @@ from cosipy.interfaces import UnbinnedThreeMLModelFoldingInterface, UnbinnedThre
 from cosipy.interfaces.source_response_interface import CachedUnbinnedThreeMLSourceResponseInterface
 from cosipy.response.threeml_response import ThreeMLModelFoldingCacheSourceResponsesMixin
 from cosipy.util.iterables import asarray
+from cosipy.util.iterables import itertools_batched
 
 class UnbinnedThreeMLModelFolding(UnbinnedThreeMLModelFoldingInterface, ThreeMLModelFoldingCacheSourceResponsesMixin):
 
     def __init__(self,
                  point_source_response = UnbinnedThreeMLSourceResponseInterface,
-                 extended_source_response: UnbinnedThreeMLSourceResponseInterface = None):
+                 extended_source_response: UnbinnedThreeMLSourceResponseInterface = None,
+                 batch_size: Optional[int] = None):
 
         # Interface inputs
         self._model = None
@@ -22,6 +24,7 @@ class UnbinnedThreeMLModelFolding(UnbinnedThreeMLModelFoldingInterface, ThreeMLM
         # Implementation inputs
         self._psr = point_source_response
         self._esr = extended_source_response
+        self._batch_size = batch_size
 
         if (self._psr is not None) and (self._esr is not None) and self._psr.event_type != self._esr.event_type:
             raise RuntimeError("Point and Extended Source Response must handle the same event type")
@@ -57,27 +60,40 @@ class UnbinnedThreeMLModelFolding(UnbinnedThreeMLModelFoldingInterface, ThreeMLM
 
         return sum(s.expected_counts() for s in self._source_responses.values())
 
+    def _expectation_density_batched_gen(self, sources: list) -> Iterable[float]:
+        batched_sources = [itertools_batched(s, self._batch_size) for s in sources]
+        
+        for chunks in zip(*batched_sources):
+            densities = [asarray(c, dtype=np.float64) for c in chunks]
+            
+            yield from np.add.reduce(densities)
+    
     def expectation_density(self) -> Iterable[float]:
-        """
-        Sum of expectation density
-        """
-
         self._cache_source_responses()
-
-        return [sum(expectations) for expectations in zip(*(s.expectation_density() for s in self._source_responses.values()))]
+        
+        if not self._source_responses:
+            return np.array([], dtype=np.float64)
+        
+        sources = [ex.expectation_density() for ex in self._source_responses.values()]
+        
+        if (self._batch_size is None) or all(hasattr(s, "__len__") for s in sources):
+            densities = [asarray(s, dtype=np.float64) for s in sources]
+            return np.add.reduce(densities)
+        else:
+            return self._expectation_density_batched_gen(sources)
 
 
 class CachedUnbinnedThreeMLModelFolding(UnbinnedThreeMLModelFolding):
     def __init__(self,
                  point_source_response: Optional[UnbinnedThreeMLSourceResponseInterface] = None,
                  extended_source_response: Optional[UnbinnedThreeMLSourceResponseInterface] = None, 
-                 vectorize:bool = True):
+                 batch_size: Optional[int] = None):
         
         super().__init__(point_source_response=point_source_response, 
-                         extended_source_response=extended_source_response)
+                         extended_source_response=extended_source_response,
+                         batch_size=batch_size)
         
         self._base_filename = "_source_response_cache.h5"
-        self._vectorize = vectorize
         
     def init_cache(self):
         """
@@ -115,18 +131,3 @@ class CachedUnbinnedThreeMLModelFolding(UnbinnedThreeMLModelFolding):
                 filepath = dir_path / f"{name}{self._base_filename}"
                 if filepath.exists():
                     response.cache_from_file(filepath)
-    
-    def _expectation_density_gen(self) -> Iterable[float]:
-        for exdensity in zip(*[ex.expectation_density() for ex in self._source_responses.values()]):
-            yield sum(exdensity)
-    
-    def expectation_density(self) -> Iterable[float]:
-        self._cache_source_responses()
-        if self._vectorize:
-            if not self._source_responses:
-                return np.array([], dtype=np.float64)
-            else:
-                densities = [asarray(ex.expectation_density(), np.float64) for ex in self._source_responses.values()]
-                return np.add.reduce(densities)
-        else:
-            return self._expectation_density_gen()

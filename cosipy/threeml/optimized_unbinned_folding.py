@@ -27,6 +27,10 @@ import astropy.constants as c
 from astropy.coordinates import SkyCoord
 from astropy.time import Time
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 from importlib.util import find_spec
 
@@ -44,7 +48,8 @@ class UnbinnedThreeMLPointSourceResponseIRFAdaptive(CachedUnbinnedThreeMLSourceR
                  irf: FarFieldSpectralInstrumentResponseFunctionInterface,
                  sc_history: SpacecraftHistory,
                  show_progress: bool = True,
-                 force_energy_node_caching: bool = False):
+                 force_energy_node_caching: bool = False,
+                 reduce_memory: bool = True):
         
         """
         Will fold the IRF with the point source spectrum by evaluating the IRF at Ei positions adaptively chosen based on characteristic IRF features
@@ -68,7 +73,8 @@ class UnbinnedThreeMLPointSourceResponseIRFAdaptive(CachedUnbinnedThreeMLSourceR
         self._peak_nodes = (18, 12)
         self._peak_widths = (0.04, 0.1)
         self._energy_range = (100., 10_000.)
-        self._batch_size = 1_000_000
+        self._cache_batch_size = 1_000_000
+        self._integration_batch_size = 1_000_000
         self._offset: Optional[float] = 1e-12
         
         # Placeholder for node pool - stored as Tensors
@@ -134,6 +140,9 @@ class UnbinnedThreeMLPointSourceResponseIRFAdaptive(CachedUnbinnedThreeMLSourceR
         self._cos_lon_scatt = torch.cos(self._lon_scatt)
         self._sin_lon_scatt = torch.sin(self._lon_scatt)
         
+        # Also runs _check_memory_savings
+        self.reduce_memory = reduce_memory
+        
     @property
     def event_type(self) -> Type[EventInterface]:
         return TimeTagEmCDSEventInSCFrameInterface
@@ -167,9 +176,14 @@ class UnbinnedThreeMLPointSourceResponseIRFAdaptive(CachedUnbinnedThreeMLSourceR
     def energy_range(self, val): self.set_integration_parameters(energy_range=val)
 
     @property
-    def batch_size(self) -> int: return self._batch_size
-    @batch_size.setter
-    def batch_size(self, val): self.set_integration_parameters(batch_size=val)
+    def cache_batch_size(self) -> int: return self._cache_batch_size
+    @cache_batch_size.setter
+    def cache_batch_size(self, val): self.set_integration_parameters(cache_batch_size=val)
+    
+    @property
+    def integration_batch_size(self) -> int: return self._integration_batch_size
+    @integration_batch_size.setter
+    def integration_batch_size(self, val): self.set_integration_parameters(integration_batch_size=val)
 
     @property
     def offset(self) -> Optional[float]: return self._offset
@@ -184,19 +198,44 @@ class UnbinnedThreeMLPointSourceResponseIRFAdaptive(CachedUnbinnedThreeMLSourceR
             raise ValueError("show_progress must be a boolean")
         self._show_progress = val
     
+    def _check_memory_savings(self):
+        inefficient = (self._integration_batch_size > (self._n_events * self._total_energy_nodes[0]/2))
+        if inefficient & self._reduce_memory:
+            logger.warning(f"Since integration_batch_size is too large reduce_memory will increase the memory usage! Disable it if this behavior is not desired.")
+    @property
+    def reduce_memory(self) -> bool: return self._reduce_memory
+    @reduce_memory.setter
+    def reduce_memory(self, val: bool):
+        if not isinstance(val, bool):
+            raise ValueError("reduce_memory must be a boolean")
+        self._reduce_memory = val
+        self._check_memory_savings()
+        if not val:
+            if self._irf_cache is not None:
+                self._irf_cache = torch.as_tensor(self._irf_cache, dtype=torch.float64)
+            if self._irf_energy_node_cache is not None:
+                self._irf_energy_node_cache = np.asarray(self._irf_energy_node_cache, dtype=np.float64)
+        else:
+            if self._irf_cache is not None:
+                self._irf_cache = torch.as_tensor(self._irf_cache, dtype=torch.float32)
+            if self._irf_energy_node_cache is not None:
+                self._irf_energy_node_cache = np.asarray(self._irf_energy_node_cache, dtype=np.float32)
+    
     def set_integration_parameters(self,
                                    total_energy_nodes: Optional[Tuple[int, int]] = None,
                                    peak_nodes: Optional[Tuple[int, int]] = None,
                                    peak_widths: Optional[Tuple[float, float]] = None,
                                    energy_range: Optional[Tuple[float, float]] = None,
-                                   batch_size: Optional[int] = None,
+                                   cache_batch_size: Optional[int] = -1,
+                                   integration_batch_size: Optional[int] = -1,
                                    offset: Optional[float] = -1.0):
         
         new_total = total_energy_nodes or self._total_energy_nodes
         new_peak_nodes = peak_nodes or self._peak_nodes
         new_peak_widths = peak_widths or self._peak_widths
         new_range = energy_range or self._energy_range
-        new_batch = batch_size if batch_size is not None else self._batch_size
+        new_cache_batch = cache_batch_size if cache_batch_size != -1 else self._cache_batch_size
+        new_integration_batch = integration_batch_size if integration_batch_size != -1 else self._integration_batch_size
         new_offset = offset if offset != -1.0 else self._offset
         
         irf_affected = (
@@ -228,8 +267,11 @@ class UnbinnedThreeMLPointSourceResponseIRFAdaptive(CachedUnbinnedThreeMLSourceR
         if new_range[0] >= new_range[1]:
             raise ValueError("The initial energy interval needs to be increasing!")
         
-        if new_batch < max(new_total):
-            raise ValueError("The batch size cannot be smaller than the number of integration nodes.")
+        if (new_cache_batch is not None) and (new_cache_batch < max(new_total)):
+            raise ValueError("The cache batch size cannot be smaller than the number of integration nodes.")
+        
+        if (new_integration_batch is not None) and (new_integration_batch < max(new_total)):
+            raise ValueError("The integration batch size cannot be smaller than the number of integration nodes.")
         
         if (new_offset is not None) and (new_offset < 0):
             raise ValueError("The offset cannot be negative.")
@@ -238,8 +280,10 @@ class UnbinnedThreeMLPointSourceResponseIRFAdaptive(CachedUnbinnedThreeMLSourceR
         self._peak_nodes = new_peak_nodes
         self._peak_widths = new_peak_widths
         self._energy_range = new_range
-        self._batch_size = new_batch
+        self._cache_batch_size = new_cache_batch if new_cache_batch is not None else (self._n_events * max(new_total))
+        self._integration_batch_size = new_integration_batch if new_integration_batch is not None else (self._n_events * max(new_total))
         self._offset = new_offset
+        self._check_memory_savings()
     
     @staticmethod
     def _build_nodes(degree: int) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -392,7 +436,7 @@ class UnbinnedThreeMLPointSourceResponseIRFAdaptive(CachedUnbinnedThreeMLSourceR
         lat_ph_rad = asarray(sc_coord_sph.lat.rad, dtype=np.float32)
 
         n_time = len(lon_ph_rad)
-        batch_size_time = self._batch_size // n_energy
+        batch_size_time = self._cache_batch_size // n_energy
 
         total_area = np.zeros(n_energy, dtype=np.float64)
         
@@ -623,7 +667,8 @@ class UnbinnedThreeMLPointSourceResponseIRFAdaptive(CachedUnbinnedThreeMLSourceR
         lat_ph_rad = asarray(sc_coord_sph.lat.rad, dtype=np.float32)
         
         phi_geo_rad, phi_igeo_rad = self._get_CDS_coordinates(torch.as_tensor(lon_ph_rad), torch.as_tensor(lat_ph_rad))
-        self._irf_energy_node_cache = np.asarray(self._get_nodes(self._energy_m_keV, self._phi_rad, phi_geo_rad, phi_igeo_rad)[0])
+        np_memory_dtype = np.float32 if self._reduce_memory else np.float64
+        self._irf_energy_node_cache = np.asarray(self._get_nodes(self._energy_m_keV, self._phi_rad, phi_geo_rad, phi_igeo_rad)[0], dtype=np_memory_dtype)
     
     def _compute_density(self):
         coord = self._source.position.sky_coord
@@ -636,9 +681,12 @@ class UnbinnedThreeMLPointSourceResponseIRFAdaptive(CachedUnbinnedThreeMLSourceR
         phi_geo_rad, phi_igeo_rad = self._get_CDS_coordinates(torch.as_tensor(lon_ph_rad), torch.as_tensor(lat_ph_rad))
 
         n_energy = self._total_energy_nodes[0]
-        batch_size_events = self._batch_size // n_energy
+        batch_size_events = self._cache_batch_size // n_energy
+        
+        np_memory_dtype = np.float32 if self._reduce_memory else np.float64
+        torch_memory_dtype = torch.float32 if self._reduce_memory else torch.float64
 
-        self._irf_cache = torch.zeros((self._n_events, n_energy), dtype=torch.float32)
+        self._irf_cache = torch.zeros((self._n_events, n_energy), dtype=torch_memory_dtype)
         
         buffer_size = n_energy * min(batch_size_events, self._n_events)
         batch_lon_src_buffer   = np.empty(buffer_size, dtype=np.float32)
@@ -649,7 +697,7 @@ class UnbinnedThreeMLPointSourceResponseIRFAdaptive(CachedUnbinnedThreeMLSourceR
         batch_lat_scatt_buffer = np.empty(buffer_size, dtype=np.float32)
         
         if (batch_size_events < self._n_events) & (self._force_energy_node_caching):
-            self._irf_energy_node_cache = np.empty((self._n_events, n_energy), dtype=np.float32)
+            self._irf_energy_node_cache = np.zeros((self._n_events, n_energy), dtype=np_memory_dtype)
         
         for i in tqdm(range(0, self._n_events, batch_size_events), 
                       disable=(not self.show_progress),
@@ -669,7 +717,7 @@ class UnbinnedThreeMLPointSourceResponseIRFAdaptive(CachedUnbinnedThreeMLSourceR
             nodes, weights = self._get_nodes(e_sl, p_sl, pg_sl, pig_sl)
 
             if batch_size_events >= self._n_events:
-                self._irf_energy_node_cache = np.asarray(nodes)
+                self._irf_energy_node_cache = np.asarray(nodes, dtype=np_memory_dtype)
             else:
                 self._irf_energy_node_cache[start:end] = np.asarray(nodes)
             
@@ -767,9 +815,11 @@ class UnbinnedThreeMLPointSourceResponseIRFAdaptive(CachedUnbinnedThreeMLSourceR
             f.attrs['peak_nodes'] = self._peak_nodes
             f.attrs['peak_widths'] = self._peak_widths
             f.attrs['energy_range'] = self._energy_range
-            f.attrs['batch_size'] = self._batch_size
+            f.attrs['cache_batch_size'] = self._cache_batch_size
+            f.attrs['integration_batch_size'] = self._integration_batch_size
             f.attrs['show_progress'] = self._show_progress
             f.attrs['force_energy_node_caching'] = self._force_energy_node_caching
+            f.attrs['reduce_memory'] = self._reduce_memory
             
             if self._offset is not None:
                 f.attrs['offset'] = self._offset
@@ -822,9 +872,11 @@ class UnbinnedThreeMLPointSourceResponseIRFAdaptive(CachedUnbinnedThreeMLSourceR
             self._peak_nodes = tuple(f.attrs['peak_nodes'])
             self._peak_widths = tuple(f.attrs['peak_widths'])
             self._energy_range = tuple(f.attrs['energy_range'])
-            self._batch_size = int(f.attrs['batch_size'])
+            self._cache_batch_size = int(f.attrs['cache_batch_size'])
+            self._integration_batch_size = int(f.attrs['integration_batch_size'])
             self._show_progress = bool(f.attrs['show_progress'])
             self._force_energy_node_caching = bool(f.attrs['force_energy_node_caching'])
+            self._reduce_memory = bool(f.attrs['reduce_memory'])
             
             if 'offset' in f.attrs:
                 self._offset = f.attrs['offset']
@@ -907,43 +959,55 @@ class UnbinnedThreeMLPointSourceResponseIRFAdaptive(CachedUnbinnedThreeMLSourceR
         self._update_cache()
         source_dict = self._source.to_dict()
         if (source_dict != self._last_convolved_source_dict_density) or (self._exp_density is None):
-            self._exp_density = torch.zeros(self._n_events, dtype=self._irf_cache.dtype)
+            self._exp_density = torch.zeros(self._n_events, dtype=torch.float64)
+            
+            n_energy = self._total_energy_nodes[0]
+            batch_size = self._integration_batch_size // n_energy
 
-            if self._irf_energy_node_cache is not None:
+            if (self._irf_energy_node_cache is not None) & (batch_size >= self._n_events):
                 flux = torch.as_tensor(
-                    self._source(self._irf_energy_node_cache.ravel()),
-                    dtype=self._irf_cache.dtype
+                    self._source(
+                        np.asarray(self._irf_energy_node_cache, dtype=np.float64).ravel()
+                        ),
+                    dtype=torch.float64
                 ).view(self._irf_energy_node_cache.shape)
+                
+                cache = torch.as_tensor(self._irf_cache, dtype=torch.float64)
 
-                torch.linalg.vecdot(self._irf_cache, flux, dim=1, out=self._exp_density)
+                torch.linalg.vecdot(cache, flux, dim=1, out=self._exp_density)
 
             else:
-                n_energy = self._total_energy_nodes[0]
-                batch_size = self._batch_size // n_energy
-                
-                sc_coord_sph = self._sc_coord_sph_cache
+                if self._irf_energy_node_cache is None:
+                    sc_coord_sph = self._sc_coord_sph_cache
 
-                lon_ph_rad = asarray(sc_coord_sph.lon.rad, dtype=np.float32)
-                lat_ph_rad = asarray(sc_coord_sph.lat.rad, dtype=np.float32)
+                    lon_ph_rad = asarray(sc_coord_sph.lon.rad, dtype=np.float32)
+                    lat_ph_rad = asarray(sc_coord_sph.lat.rad, dtype=np.float32)
 
-                phi_geo_rad, phi_igeo_rad = self._get_CDS_coordinates(torch.as_tensor(lon_ph_rad), torch.as_tensor(lat_ph_rad))
+                    phi_geo_rad, phi_igeo_rad = self._get_CDS_coordinates(torch.as_tensor(lon_ph_rad), torch.as_tensor(lat_ph_rad))
 
                 for i in range(0, self._n_events, batch_size):
                     end = min(i + batch_size, self._n_events)
 
-                    e_sl = self._energy_m_keV[i:end]
-                    p_sl = self._phi_rad[i:end]
-                    pg_sl = phi_geo_rad[i:end]
-                    pig_sl = phi_igeo_rad[i:end]
+                    if self._irf_energy_node_cache is None:
+                        e_sl = self._energy_m_keV[i:end]
+                        p_sl = self._phi_rad[i:end]
+                        pg_sl = phi_geo_rad[i:end]
+                        pig_sl = phi_igeo_rad[i:end]
 
-                    nodes, _ = self._get_nodes(e_sl, p_sl, pg_sl, pig_sl)
+                        nodes, _ = self._get_nodes(e_sl, p_sl, pg_sl, pig_sl)
+                    else:
+                        nodes = self._irf_energy_node_cache[i:end]
+                        
+                    nodes = np.asarray(nodes, dtype=np.float64)
 
                     flux_batch = torch.as_tensor(
-                        self._source(np.asarray(nodes).ravel()),
-                        dtype=self._irf_cache.dtype
+                        self._source(nodes.ravel()),
+                        dtype=torch.float64
                     ).view(nodes.shape)
                     
-                    torch.linalg.vecdot(self._irf_cache[i:end], flux_batch, dim=1, out=self._exp_density[i:end])
+                    cache = torch.as_tensor(self._irf_cache[i:end], dtype=torch.float64)
+                    
+                    torch.linalg.vecdot(cache, flux_batch, dim=1, out=self._exp_density[i:end])
             
         self._last_convolved_source_dict_density = source_dict
         
