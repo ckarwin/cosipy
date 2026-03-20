@@ -1,4 +1,10 @@
 import logging
+
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    # Guard preventing circulat import
+    from cosipy import SpacecraftHistory
+
 logger = logging.getLogger(__name__)
 
 import numpy as np
@@ -175,10 +181,10 @@ class GoodTimeInterval():
 
     @classmethod
     def from_pointing_cut(cls,
-                          target_coord,
-                          sc_history,
-                          max_offaxis,
-                          earth_occ = False):
+                          target_coord : SkyCoord,
+                          sc_history : 'SpacecraftHistory',
+                          max_offaxis : u.Quantity,
+                          earth_occ : bool = False):
         """
         Build a GTI where a fixed sky position is within a maximum off-axis angle of the spacecraft boresight.
 
@@ -200,21 +206,15 @@ class GoodTimeInterval():
             GTI containing time ranges that satisfy the pointing cut.
         """
 
-        if not isinstance(target_coord, SkyCoord):
-            raise TypeError("target_coord must be an astropy.coordinates.SkyCoord")
-        if not isinstance(max_offaxis, u.Quantity):
-            raise TypeError("max_offaxis must be an astropy.units.Quantity")
+        source_sc = sc_history.get_target_in_sc_frame(target_coord)
 
-        source_sc = target_coord.transform_to(sc_history.attitude.frame)
-        source_sc = source_sc.cartesian.xyz.value
+        colatitude = np.pi/2 - source_sc.lat.to_value(u.rad)
 
-        _, colatitude = sc_history._get_target_in_sc_frame(source_sc)
         in_fov = colatitude[:-1] <= max_offaxis.to_value(u.rad)
 
         if earth_occ:
-            source_gcrs = target_coord.transform_to(sc_history.location)
-            source_gcrs = source_gcrs.cartesian.xyz.value
-            in_fov = in_fov & (~sc_history._get_earth_occ(source_gcrs)[:-1])
+            occulted = sc_history.get_earth_occ(target_coord)
+            in_fov = in_fov & (~occulted[:-1])
 
         if not np.any(in_fov):
             empty_time = Time([],
