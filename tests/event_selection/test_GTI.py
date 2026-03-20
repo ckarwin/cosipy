@@ -5,27 +5,43 @@ from astropy.coordinates import Galactic, SkyCoord
 from astropy.time import Time
 from types import SimpleNamespace
 
+from scoords import SpacecraftFrame
+
+from cosipy import SpacecraftHistory
 from cosipy.event_selection import GoodTimeInterval
 
 
-class DummySpacecraftHistory:
+class DummySpacecraftHistory(SpacecraftHistory):
 
     def __init__(self, colatitude, earth_occ=None):
-        self.intervals_tstart = Time([60970.0, 60971.0, 60972.0, 60973.0, 60974.0],
-                                     format='mjd', scale='utc')
-        self.intervals_tstop = Time([60971.0, 60972.0, 60973.0, 60974.0, 60975.0],
-                                    format='mjd', scale='utc')
-        self.attitude = SimpleNamespace(frame=Galactic())
-        self.location = Galactic()
+
         self._colatitude = np.asarray(colatitude, dtype=float)
         if earth_occ is None:
             earth_occ = np.zeros_like(self._colatitude, dtype=bool)
         self._earth_occ = np.asarray(earth_occ, dtype=bool)
 
-    def _get_target_in_sc_frame(self, source):
-        return np.zeros_like(self._colatitude), self._colatitude
+    @property
+    def intervals_tstart(self):
+        return Time([60970.0, 60971.0, 60972.0, 60973.0, 60974.0],
+                                 format='mjd', scale='utc')
 
-    def _get_earth_occ(self, source):
+    @property
+    def intervals_tstop(self):
+        return Time([60971.0, 60972.0, 60973.0, 60974.0, 60975.0],
+                                format='mjd', scale='utc')
+
+    @property
+    def attitude(self):
+        return SimpleNamespace(frame=Galactic())
+
+    @property
+    def location(self):
+        return Galactic()
+
+    def get_target_in_sc_frame(self, source):
+        return SkyCoord(lon = np.zeros_like(self._colatitude), lat = np.pi/2 - self._colatitude, unit = 'rad', frame = SpacecraftFrame())
+
+    def get_earth_occ(self, source):
         return self._earth_occ
 
 def test_GTI(tmp_path):
