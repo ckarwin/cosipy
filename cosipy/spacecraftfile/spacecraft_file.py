@@ -402,10 +402,25 @@ class SpacecraftHistory:
         # Type OrientationsGalactic
         # ...
         # EN
-        # Using [:-1] instead of skipfooter=1 because otherwise it's
-        # slow and you get ParserWarning: Falling back to the 'python'
-        # engine because the 'c' engine does not support skipfooter;
-        # you can avoid this warning by specifying engine='python'.
+
+        # Check that the EN line is present (and throw an error if
+        # not), lest we accidentally drop the last line of orientation
+        # data!
+        with open(file, "rb") as ori_file:
+            ori_file.seek(-4, 2)
+            s = ori_file.read(4)
+
+            # allow for possibility of missing EOL at end of file
+            if s[-1] == ord('\n'):
+                s = s[:-1]
+
+            if s != b'\nEN':
+                raise ValueError(".ori file must end with final line 'EN'!")
+
+        # now read the full file, skipping the first and last line.
+        # Use [:-1] instead of skipfooter=1; the latter causes a
+        # fallback to the slow Python CSV reading engine instead of
+        # faster C engine.
 
         df = pd.read_csv(file, sep=r"\s+", skiprows=1,
                          usecols=tuple(range(1,10)),
@@ -1141,7 +1156,7 @@ class SpacecraftHistory:
             # do not interpolate
             pixels = base.ang2pix(theta=theta,
                                   phi=phi,
-                                  lonlat=lonlat)
+                                  lonlat=False)
             weighted_duration = duration
 
         unique_pixels, unique_weights = \
