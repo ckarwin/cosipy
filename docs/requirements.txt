@@ -2,3 +2,4 @@ ipykernel
 nbsphinx
 Pygments==2.6.1
 mock
+sphinx_rtd_theme
