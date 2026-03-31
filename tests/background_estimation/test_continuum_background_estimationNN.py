@@ -3,7 +3,7 @@ import pytest
 
 pytest.importorskip("torch", reason="Optional torch dependencies not installed")
 
-from cosipy.background_estimation import ContinuumEstimationInterp, ContinuumEstimationNN
+from cosipy.background_estimation.ml import ContinuumEstimationInterp, ContinuumEstimationNN
 from cosipy import test_data
 
 def test_continuum_background_estimation(tmp_path,monkeypatch):
