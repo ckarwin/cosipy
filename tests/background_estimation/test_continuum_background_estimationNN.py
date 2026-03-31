@@ -1,19 +1,29 @@
 import pytest
 
-
-pytest.importorskip("torch", reason="Optional torch dependencies not installed")
-
-from cosipy.background_estimation.ml import ContinuumEstimationInterp, ContinuumEstimationNN
+from cosipy.background_estimation import ContinuumEstimationInterp
 from cosipy import test_data
 
-def test_continuum_background_estimation(tmp_path,monkeypatch):
-   
+
+def test_continuum_background_estimation_interp(tmp_path, monkeypatch):
+
+    # Test simple inpainting method:
+    input_data = test_data.path / "crab_bkg_binned_data_for_continuum_bg_testing.hdf5"
+    psr_file = test_data.path / "test_precomputed_response.h5"
+
+    instance = ContinuumEstimationInterp()
+    instance.estimate_bg(input_data, psr_file)
+
+def test_continuum_background_estimation_nn(tmp_path,monkeypatch):
+
+    pytest.importorskip("torch", reason="Optional torch dependencies not installed")
+
+    from cosipy.background_estimation.ml import ContinuumEstimationNN
+
     monkeypatch.chdir(tmp_path)
 
     instance = ContinuumEstimationNN() 
      
     # Test main method:
-    data_yaml = test_data.path / "inputs_crab_continuum_bg_estimation_testing.yaml"
     input_data = test_data.path / "crab_bkg_binned_data_for_continuum_bg_testing.hdf5"
     psr_file = test_data.path / "test_precomputed_response.h5"
    
@@ -41,7 +51,3 @@ def test_continuum_background_estimation(tmp_path,monkeypatch):
         training_mode="hybrid", containment=0.6, epochs=1, em_bin=1, phi_bin=1)
     
     instance.plot_training_loss("inpainting_nn_model_training_loss.npy",1,"training_loss",show_plot=False)
-
-    # Test simple inpainging method:
-    instance = ContinuumEstimationInterp()
-    instance.estimate_bg(input_data, psr_file)

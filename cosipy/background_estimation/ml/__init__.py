@@ -5,4 +5,3 @@ if not cosipy.with_ml:
 
 from .ContinuumEstimationNN import ContinuumEstimationNN
 from .ContinuumEstimationNN import GCN
-from .ContinuumEstimationNN import ContinuumEstimationInterp
