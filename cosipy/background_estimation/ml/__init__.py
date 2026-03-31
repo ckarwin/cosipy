@@ -1,7 +1,7 @@
-from importlib.util import find_spec
+import cosipy
 
-if find_spec("torch") is None:
-    raise RuntimeError("Install cosipy with [ml] optional packages to use these features.")
+if not cosipy.with_ml:
+    raise ImportError("Install cosipy with [ml] optional packages to use these features.")
 
 from .ContinuumEstimationNN import ContinuumEstimationNN
 from .ContinuumEstimationNN import GCN
