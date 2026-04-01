@@ -357,49 +357,6 @@ class ContinuumEstimationInterp:
 
         return
 
-    def plot_training_loss(self, input_file, energy_bin, save_prefix, show_plot=True, vmax=70000):
-
-        """Plot training loss as a function of Phi and number of epochs
-        for a given energy bin.
-
-        Parameters
-        ----------
-        input_file : str
-            File name for input training loss array.
-        energy_bin : int
-            Energy bin to plot.
-        save_prefix : str
-            Prefix of saved image file.
-        show_plot : bool, optional
-            Whether to show plot (default is True).
-        vmax : float, optional
-            Max plot value. Default is 70000.
-        """
-
-        # Load loss data
-        loss_data = np.load(input_file)  # shape: (Energy, Phi, Epochs)
-
-        loss_slice = loss_data[energy_bin]  # shape: (Phi, Epochs)
-
-        # Transpose to shape (Epochs, Phi) for plotting
-        loss_slice = loss_slice.T
-
-        # Create the plot
-        plt.figure(figsize=(8, 5))
-        plt.imshow(loss_slice, aspect='auto', origin='lower', cmap='viridis',
-                   extent=[0, loss_slice.shape[1], 0, loss_slice.shape[0]], vmax=vmax)
-
-        plt.colorbar(label='Loss')
-        plt.xlabel('Phi bin')
-        plt.ylabel('Epoch')
-        plt.title(f"Training Loss Map (Energy bin {energy_bin})")
-        plt.tight_layout()
-        plt.savefig(f"{save_prefix}.png", dpi=150)
-        if show_plot:
-            plt.show()
-
-        return
-
     def load_estimated_bg(self, estimated_bg_file):
 
         """Loads inpainted histrogram from h5 file.
