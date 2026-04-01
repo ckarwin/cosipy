@@ -11,6 +11,7 @@ jobs:
         python-version: ["3.12"]
 
     steps:
+      - uses: actions/checkout@v4
       # Ideally we would like to install everything
       # automatically with pip. However, there's a conflict
       # between the OpenMP libraries shipped with healpy and
