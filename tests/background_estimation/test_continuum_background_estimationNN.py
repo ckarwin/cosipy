@@ -2,6 +2,7 @@ import pytest
 
 from cosipy.background_estimation import ContinuumEstimationInterp
 from cosipy import test_data
+import cosipy
 
 
 def test_continuum_background_estimation_interp(tmp_path, monkeypatch):
@@ -15,7 +16,8 @@ def test_continuum_background_estimation_interp(tmp_path, monkeypatch):
 
 def test_continuum_background_estimation_nn(tmp_path,monkeypatch):
 
-    pytest.importorskip("torch", reason="Optional torch dependencies not installed")
+    if not cosipy.with_ml:
+        pytest.skip(reason="Optional [ml] dependencies not installed")
 
     from cosipy.background_estimation.ml import ContinuumEstimationNN
 
