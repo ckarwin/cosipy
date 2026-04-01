@@ -23,6 +23,20 @@ from .ts_map import FastTSMap, MOCTSMap
 from .source_injector import SourceInjector
 
 from .background_estimation import LineBackgroundEstimation
-from .background_estimation import ContinuumEstimation
 from .background_estimation import TransientBackgroundEstimation
 
+def _with_ml():
+    from importlib.util import find_spec
+    ml_pkg = [
+        "torch",
+        "torch_geometric"
+    ]
+    with_ml = True
+    for pkg in ml_pkg:
+        if not find_spec(pkg):
+            with_ml = False
+            break
+
+    return with_ml
+
+with_ml = _with_ml()
