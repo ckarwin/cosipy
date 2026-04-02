@@ -16,7 +16,7 @@ List of tutorials and contents, as a link to the corresponding Python notebook i
   - Combining files.
   - Inspecting and plotting the data
     
-2. Spacecraft orientation and location `(ipynb) <https://github.com/cositools/cosipy/tree/main/docs/tutorials/response/SpacecraftFile.ipynb>`_
+2. Spacecraft orientation and location `(ipynb) <https://github.com/cositools/cosipy/tree/main/docs/tutorials/response/SpacecraftHistory.ipynb>`_
   
   - SC file format and manipulation it —e.g. get a time range, rebin it.  
   - The dwell time map and how to obtain it
@@ -53,7 +53,7 @@ List of tutorials and contents, as a link to the corresponding Python notebook i
   - Pre-computing a response in galactic coordinates for all-sky
   - Fitting an extended source
     
-8. Image deconvolution `(ipynb) <https://github.com/cositools/cosipy/tree/main/docs/tutorials/image_deconvolution/511keV/GalacticCDS/511keV-Galactic-ImageDeconvolution.ipynb>`_
+8. Image deconvolution `(ipynb) <https://github.com/cositools/cosipy/tree/main/docs/tutorials/image_deconvolution/511keV-Galactic-ImageDeconvolution.ipynb>`_
   - Explain the RL algorithm. Reference the previous example. Explain the difference with a TS map.
   - Fitting the 511 diffuse emission.
   - Analyze data in the Compton data space with galactic coordinates.
@@ -79,13 +79,13 @@ List of tutorials and contents, as a link to the corresponding Python notebook i
    :maxdepth: 1
 
    Data format and handling <DataIO/DataIO_example.ipynb>
-   response/SpacecraftFile.ipynb
+   response/SpacecraftHistory.ipynb
    Detector response and signal expectation <response/DetectorResponse.ipynb>
    TS Map: localizing a GRB <ts_map/Parallel_TS_map_computation.ipynb>
    Fitting the spectrum of a GRB <spectral_fits/continuum_fit/grb/SpectralFit_GRB.ipynb>
    Fitting the spectrum of the Crab <spectral_fits/continuum_fit/crab/SpectralFit_Crab.ipynb>
    Extended source model fitting <spectral_fits/extended_source_fit/diffuse_511_spectral_fit.ipynb>
-   Image deconvolution <image_deconvolution/511keV/ScAttBinning/511keV-ScAtt-ImageDeconvolution.ipynb>
+   Image deconvolution <image_deconvolution/511keV-ScAtt-ImageDeconvolution.ipynb>
    Source injector <source_injector/Point_source_injector.ipynb>
    Continuum Background Estimation <background_estimation/continuum_estimation/BG_estimation_example.ipynb>
    Line background estimation <background_estimation/line_background/line_background_estimation_example_notebook.ipynb>
