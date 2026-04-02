@@ -1,4 +1,4 @@
-name: docs
+name: docs-local-build
 
 on: [push, pull_request, workflow_dispatch]
 
