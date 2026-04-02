@@ -30,6 +30,8 @@ dependencies = [
 
 [project.optional-dependencies]
 # Machine learning stuff
+# If you update the packages here, make sure to do the same changes in
+# cosipy.__init__.py _has_ml
 ML = ["torch", "torch_geometric"]
 
 [project.urls]

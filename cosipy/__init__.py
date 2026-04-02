@@ -25,6 +25,9 @@ from .source_injector import SourceInjector
 from .background_estimation import LineBackgroundEstimation
 from .background_estimation import TransientBackgroundEstimation
 
+# Flag to detect whether cosipy has all optional machine learning [ml] dependencies
+# If you update the packages here, make sure to do the same changes in
+# pyproject.toml project.optional-dependencies.ML
 def _with_ml():
     from importlib.util import find_spec
     ml_pkg = [
