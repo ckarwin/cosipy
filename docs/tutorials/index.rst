@@ -87,6 +87,6 @@ List of tutorials and contents, as a link to the corresponding Python notebook i
    Extended source model fitting <spectral_fits/extended_source_fit/diffuse_511_spectral_fit.ipynb>
    Image deconvolution <image_deconvolution/511keV-Galactic-ImageDeconvolution.ipynb>
    Source injector <source_injector/Point_source_injector.ipynb>
-   Continuum Background Estimation <background_estimation/continuum_estimation/BG_estimation_example.ipynb>
+   Continuum Background Estimation <background_estimation/continuum_estimation/BG_estimationNN_example.ipynb>
    Line background estimation <background_estimation/line_background/line_background_estimation_example_notebook.ipynb>
    Polarization (ASAD method) <polarization/ASAD_method.ipynb>
