@@ -70,7 +70,11 @@ class SpacecraftHistory:
 
         """
 
-        time_axis = TimeAxis(obstime, copy = False, label= 'obstime')
+        self._obstime = obstime
+        self._t0 = self._obstime[0]
+        self._obstime_dt_jd = self._get_dt_jd(obstime)
+
+        time_axis = Axis(self._obstime_dt_jd, copy = False, label= 'obstime_dt_jd')
 
         if livetime is None:
             livetime = time_axis.widths.to(u.s)
@@ -90,37 +94,41 @@ class SpacecraftHistory:
 
         self._cache_earth_occ = False
 
+    def _get_dt_jd(self, time: Time):
+        time = time - self._t0
+        return time.jd1 + time.jd2
+
     @property
     def nintervals(self):
         return self._livetime_hist.nbins
 
     @property
     def intervals_duration(self):
-        return self._livetime_hist.axis.widths.to(self._livetime_hist.unit)
+        return Quantity(self._livetime_hist.axis.widths, u.day, copy = False)
 
     @property
     def intervals_tstart(self):
-        return self._livetime_hist.axis.lower_bounds
+        return self._obstime[:-1]
 
     @property
     def intervals_tstop(self):
-        return self._livetime_hist.axis.upper_bounds
+        return self._obstime[1:]
 
     @property
     def tstart(self):
-        return self._livetime_hist.axis.lo_lim
+        return self._obstime[0]
 
     @property
     def tstop(self):
-        return self._livetime_hist.axis.hi_lim
+        return self._obstime[-1]
 
     @property
     def npoints(self):
-        return self._livetime_hist.nbins + 1
+        return self._obstime.size
 
     @property
     def obstime(self):
-        return self._livetime_hist.axis.edges
+        return self._obstime
 
     @property
     def livetime(self):
@@ -279,18 +287,34 @@ class SpacecraftHistory:
     @staticmethod
     def _find_time_index(time:Time, tstart:Time, tstop:Time):
 
-        # TimeAxis optimizes searchsorted for 128bit precision
-        time_axis = TimeAxis(time, copy=False)
+        if time.shape == ():
+            # Scalar
+            t0 = time
+        else:
+            t0 = time[0]
+
+        time = time - t0
+        time = time.jd1 + time.jd2
+
+        tstart = tstart - t0
+        tstart = tstart.jd1 + tstart.jd2
+
+        tstop = tstop - t0
+        tstop = tstop.jd1 + tstop.jd2
 
         if tstart is not None:
-            start_idx = time_axis.find_bin(tstart)
+            if tstop is not None:
+                start_idx, stop_idx = np.searchsorted(time, [tstart, tstop], side='right')
+            else:
+                start_idx = np.searchsorted(time, tstart, side='right')
+                stop_idx = time.size
         else:
             start_idx = 0
+            stop_idx = np.searchsorted(time, tstop, side='right')
 
-        if tstop is not None:
-            stop_idx = time_axis.find_bin(tstop) + 2
-        else:
-            stop_idx = time.size
+        # Include the full bin, but prevent an index error
+        start_idx = max(0, start_idx - 1)
+        start_idx = min(time.size, stop_idx + 1)
 
         return start_idx, stop_idx
 
@@ -723,6 +747,7 @@ class SpacecraftHistory:
         return self._cumulative_livetime(points, weights)
 
     def interp_weights(self, times: Time):
+        times = self._get_dt_jd(times)
         return self._livetime_hist.axis.interp_weights_edges(times)
 
     def interp(self, times: Time) -> 'SpacecraftHistory':
