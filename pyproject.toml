@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [project]
 name = "cosipy"
-version = "0.4.1dev0"
+version = "0.4.2dev0"
 authors = [
           { name = "COSI Team", email = "imc@umd.edu" }
           ]
@@ -30,6 +30,8 @@ dependencies = [
 
 [project.optional-dependencies]
 # Machine learning stuff
+# If you update the packages here, make sure to do the same changes in
+# cosipy.__init__.py _has_ml
 ML = ["torch", "torch_geometric", "normflows", "sphericart[torch]"]
 
 [project.urls]
