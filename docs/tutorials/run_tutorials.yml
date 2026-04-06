@@ -95,6 +95,20 @@ tutorials:
         COSI-SMEX/develop/Data/Responses/SMEXv12.Continuum.HEALPixO3_10bins_log_flat.binnedimaging.imagingresponse.h5:
           checksum: eb72400a1279325e9404110f909c7785
 
+    spectral_fit_normalizing_flows:
+      notebook: spectral_fits/continuum_fit/crab/example_crab_fit_normalizing_flows.ipynb
+      wasabi_files:
+        COSI-SMEX/DC3/Data/Sources/crab_standard_3months_unbinned_data_filtered_with_SAAcut.fits.gz:
+          checksum: 1d73e7b9e46e51215738075e91a52632
+        COSI-SMEX/DC3/Data/Orientation/DC3_final_530km_3_month_with_slew_15sbins_GalacticEarth_SAA.ori:
+          checksum: e5e71e3528e39b855b0e4f74a1a2eebe
+        COSI-SMEX/DC4/Data/Backgrounds/Total_DC4_BG_3months_unbinned_data_filtered_with_SAAcut_withSAAbck.fits.gz:
+          checksum: 73c8b23e43684da3b35c25499254202b
+        COSI-SMEX/DC4/Data/Responses/unpolarized_nfresponse_v1-00.pt:
+          checksum: a4f9a7842f2a7345f604da32a155803f
+        COSI-SMEX/DC4/Data/Responses/nfbackground_v1-01.pt:
+          checksum: 52a4fb024930e18430bff80db882d3d5
+
     spectral_fit_crab:
       notebook: spectral_fits/continuum_fit/crab/SpectralFit_Crab.ipynb
       ancillary_files:
