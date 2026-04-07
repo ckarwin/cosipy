@@ -1,10 +1,6 @@
 ---
 #----------#
 # Data I/O:
-
-# data files available on the COSI Sharepoint: https://drive.google.com/drive/folders/1UdLfuLp9Fyk4dNussn1wt7WEOsTWrlQ6
-# data_file: "/disk2/abhi/cosipy_pulsar_analysis/crab/Crab_notebook_copy_for_our_data/Crab_DC2_3months_unbinned_data_w_PULSE_PHASE.fits.gz" # full path
-# data_file: "/disk2/abhi/cosipy_pulsar_analysis/crab/Crab_notebook_copy_for_our_data/Crab_AlbedoPhotons_DC3_3months_unbinned_data.fits.gz"
 data_file: "crab_with_albedo_10d.fits"
 ori_file: "20280301_3_month_with_orbital_info.ori" # full path
 unbinned_output: "fits" # 'fits' or 'hdf5'
