@@ -978,7 +978,7 @@ class SpacecraftHistory:
             if np.any(dist_earth_center < self._r_earth):
                 logger.warning("computed altitude for orientation is negative!"
                                "clamping to 0")
-                dist_earth_center = np.max(dist, self._r_earth)
+                dist_earth_center = np.max(dist_earth_center, self._r_earth)
 
             # sine of angle between lines through satellite (1) normal
             # to earth and (2) tangent to earth
