@@ -1,89 +1,96 @@
-# Imports:
 import sys
+
 import numpy as np
-import h5py
-from histpy import Histogram, HealpixAxis, Axis
-from scoords import SpacecraftFrame, Attitude
+
+import astropy.units as u
+from astropy.coordinates import SkyCoord
+
 from mhealpy import HealpixMap, HealpixBase
-import healpy as hp
+
 import pandas as pd
 import matplotlib.pyplot as plt
-from cosipy.make_plots import MakePlots
+
+from histpy import Histogram, HealpixAxis, Axis, Axes
+from scoords import SpacecraftFrame
+
 from cosipy.data_io import UnBinnedData
+
 import logging
 import astropy.units as u
 from astropy.coordinates import SkyCoord
+
+from cosipy.interfaces import BinnedDataInterface
+
 logger = logging.getLogger(__name__)
 
 
 class BinnedData(UnBinnedData):
     """Handles binned data."""
 
-    def get_binned_data(self, unbinned_data=None, output_name=None, \
-            make_binning_plots=False, psichi_binning="galactic", event_range=None):
+    def get_binned_data(self, unbinned_data=None, output_name=None,
+                        make_binning_plots=False, show_plots=False,
+                        psichi_binning="galactic", event_range=None,
+                        weights=None):
 
         """Bin the data using histpy and mhealpy.
-        
+
         Parameters
         ----------
         unbinned_data : str, optional
-            Name of unbinned data file to use. Input file is either 
-            .fits or .hdf5 as specified in the unbinned_output 
-            parameter in inputs.yaml.     
+            Name of unbinned data file to use. Input file is either
+            .fits or .hdf5 as specified in the unbinned_output
+            parameter in inputs.yaml.
         output_name : str, optional
             Prefix of output file.
         make_binning_plots : bool, optional
             Option to make basic plots of the binning (default is False).
+        show_plots : bool, optional
+            Option to show plots (default is False).
         psichi_binning : str, optional
-            'galactic' for binning psichi in Galactic coordinates, or 
-            'local' for binning in local coordinates. Default is Galactic. 
-        event_range : list of integers, optional 
-            min and max event to use for the binning. 
-        
+            'galactic' for binning psichi in Galactic coordinates, or
+            'local' for binning in local coordinates. Default is Galactic.
+        event_range : list of integers, optional
+            min and max event to use for the binning.
+        weights : value or array of values, optional
+            weight to use when filling the Histogram, if not set histpy will
+            use weight of 1
+
         Returns
         -------
         binned_data : histpy:Histogram
-            Data is binned in four axes: time, measured energy, 
-            Compton scattering angle (phi), and scattering direction 
+            Data is binned in four axes: time, measured energy,
+            Compton scattering angle (phi), and scattering direction
             (PsiChi).
 
         Note
         ----
-        This method constructs the instance attribute, binned_data, 
+        This method constructs the instance attribute, binned_data,
         but it does not explicitly return it.
         """
-        
-        # Make print statement:
-        print("binning data...")
-      
+
+        # Log message:
+        logger.info("binning data...")
+
         # Option to read in unbinned data file:
         if unbinned_data:
-            if self.unbinned_output == 'fits':
-                self.cosi_dataset = self.get_dict_from_fits(unbinned_data)
-            if self.unbinned_output == 'hdf5':
-                self.cosi_dataset = self.get_dict_from_hdf5(unbinned_data)
+            self.cosi_dataset = self.get_dict(unbinned_data)
 
         # Get time bins:
         min_time = self.tmin
         max_time = self.tmax
-        if type(self.time_bins).__name__ in ['int','float']:
-            # Get time bins: 
+        if isinstance(self.time_bins, (int, float)):
+            # Get time bins:
             delta_t = max_time - min_time
             num_bins = round(delta_t / self.time_bins)
             new_bin_size = delta_t / num_bins
             if self.time_bins != new_bin_size:
-                print()
-                print("Note: time bins must be equally spaced between min and max time.")
-                print("Using time bin size [s]: " + str(new_bin_size))
-                print()
+                logger.info("Note: time bins must be equally spaced between min and max time.")
+                logger.info(f"Using time bin size [s]: {new_bin_size}")
             time_bin_edges = np.linspace(min_time,max_time,num_bins+1)
-
-        if type(self.time_bins).__name__ == 'list':
+        elif isinstance(self.time_bins, list):
             # Check that bins correspond to min and max time:
-            if (self.time_bins[0] > min_time) | (self.time_bins[-1] < max_time):
-                print()
-                print("ERROR: Time bins do not cover the full selected data range!")
-                print()
+            if self.time_bins[0] > min_time or self.time_bins[-1] < max_time:
+                logger.error("ERROR: Time bins do not cover the full selected data range!")
                 sys.exit()
             time_bin_edges = np.array(self.time_bins)
 
@@ -96,95 +103,94 @@ class BinnedData(UnBinnedData):
 
         # Define psichi axis and data for binning:
         if psichi_binning == 'galactic':
-            psichi_axis = HealpixAxis(nside = self.nside, 
-                    scheme = self.scheme, coordsys = 'galactic', label='PsiChi')
-            coords = SkyCoord(l=self.cosi_dataset['Chi galactic']*u.deg, 
-                    b=self.cosi_dataset['Psi galactic']*u.deg, frame = 'galactic')
-        if psichi_binning == 'local':
-            psichi_axis = HealpixAxis(nside = self.nside, 
-                    scheme = self.scheme, coordsys = SpacecraftFrame(), label='PsiChi')
-            coords = SkyCoord(lon=self.cosi_dataset['Chi local']*u.rad, 
-                    lat=((np.pi/2.0) - self.cosi_dataset['Psi local'])*u.rad, 
-                    frame = SpacecraftFrame())
+            psichi_axis = HealpixAxis(nside = self.nside,
+                                      scheme = self.scheme,
+                                      coordsys = 'galactic',
+                                      label = 'PsiChi')
+            coords = SkyCoord(l=self.cosi_dataset['Chi galactic'],
+                              b=self.cosi_dataset['Psi galactic'],
+                              unit=u.deg ,frame='galactic')
+        elif psichi_binning == 'local':
+            psichi_axis = HealpixAxis(nside = self.nside,
+                                      scheme = self.scheme,
+                                      coordsys = SpacecraftFrame(),
+                                      label = 'PsiChi')
+            coords = SkyCoord(lon=self.cosi_dataset['Chi local'],
+                              lat=np.pi/2.0 - self.cosi_dataset['Psi local'],
+                              unit=u.rad, frame=SpacecraftFrame())
 
         # Initialize histogram:
-        self.binned_data = Histogram([Axis(time_bin_edges*u.s, label='Time'), 
-            Axis(energy_bin_edges*u.keV, label='Em'), 
-            Axis(phi_bin_edges*u.deg, label='Phi'), 
-            psichi_axis], 
-            sparse=True)
-         
+        axes = Axes([Axis(time_bin_edges, unit=u.s, label='Time'),
+                     Axis(energy_bin_edges, unit=u.keV, label='Em'),
+                     Axis(phi_bin_edges, unit=u.deg, label='Phi'),
+                     psichi_axis], copy_axes=False)
+        self.binned_data = Histogram(axes, sparse=True)
+
         # Fill histogram:
-        if event_range == None:
-            self.binned_data.fill(self.cosi_dataset['TimeTags']*u.s, 
-                    self.cosi_dataset['Energies']*u.keV, 
-                    np.rad2deg(self.cosi_dataset['Phi'])*u.deg, 
-                    coords)
-        if event_range != None:
+        if event_range is None:
+            low = 0
+            high = -1
+        else:
             low = int(event_range[0])
             high = int(event_range[1])
-            self.binned_data.fill(self.cosi_dataset['TimeTags'][low:high]*u.s, 
-                    self.cosi_dataset['Energies'][low:high]*u.keV, 
-                    np.rad2deg(self.cosi_dataset['Phi'][low:high])*u.deg, 
-                    coords[low:high])
+
+        self.binned_data.fill(u.Quantity(self.cosi_dataset['TimeTags'][low:high], u.s, copy=False),
+                              u.Quantity(self.cosi_dataset['Energies'][low:high], u.keV, copy=False),
+                              u.Quantity(np.rad2deg(self.cosi_dataset['Phi'][low:high]), u.deg, copy=False),
+                              coords[low:high], weight=weights)
 
         # Save binned data to hdf5 file:
-        if output_name != None:
-            self.binned_data.write('%s.hdf5' %output_name, overwrite=True)
+        if output_name is not None:
+            self.binned_data.write(f'{output_name}.hdf5', overwrite=True)
 
         # Get binning information:
         self.get_binning_info()
 
         # Plot the binned data:
-        if make_binning_plots == True:
-            self.plot_binned_data()  
-            self.plot_psichi_map()
-
-        return
+        if make_binning_plots:
+            self.plot_binned_data(show_plots=show_plots)
 
     def load_binned_data_from_hdf5(self,binned_data):
 
         """Loads binned histogram from hdf5 file.
-        
+
         Parameters
         ----------
         binned_data : str
-            Name of binned data file to load. 
+            Name of binned data file to load.
 
         Returns
         -------
         binned_data : histpy:Histogram
-            Data is binned in four axes: time, measured energy, 
-            Compton scattering angle (phi), and scattering direction 
+            Data is binned in four axes: time, measured energy,
+            Compton scattering angle (phi), and scattering direction
             (PsiChi).
 
         Note
         ----
-        This method sets the instance attribute, binned_data, 
+        This method sets the instance attribute, binned_data,
         but it does not explicitly return it.
         """
-        
-        self.binned_data = Histogram.open(binned_data)    
 
-        return
+        self.binned_data = Histogram.open(binned_data)
 
     def get_binning_info(self, binned_data=None):
 
         """Get binning information from Histpy histogram.
-        
+
         Parameters
         ----------
         binned_data : str
             Name of binned data hdf5 file to use.
         """
-        
+
         # Option to read in binned data from hdf5 file:
         if binned_data:
             self.load_binned_data_from_hdf5(binned_data)
-       
+
         # Print units of axes:
         for each in self.binned_data.axes:
-            print(each.label + " unit: " + str(each.unit))
+            logger.info(f"{each.label} unit: {each.unit}")
 
         # Get time binning information:
         self.time_hist = self.binned_data.project('Time').contents.todense()
@@ -214,83 +220,104 @@ class BinnedData(UnBinnedData):
         self.psichi_bin_centers = self.binned_data.axes['PsiChi'].centers
         self.psichi_bin_edges = self.binned_data.axes['PsiChi'].edges
         self.psichi_bin_widths = self.binned_data.axes['PsiChi'].widths
-         
-        return
 
-    def plot_binned_data(self, binned_data=None):
+    def plot_binned_data(self, binned_data=None, show_plots=True):
 
         """Plot binnned data for all axes.
-        
+
         Parameters
         ----------
         binned_data : histpy:Histogram, optional
-            Name of binned histogram to use. 
+            Name of binned histogram to use.
+        show_plots : bool, optional
+            Option to show plots (default is True).
         """
-        
+
         # Option to read in binned data from hdf5 file:
         if binned_data:
             self.load_binned_data_from_hdf5(binned_data)
-    
+
         # Define plot dictionaries:
-        time_energy_plot = {"projection":["Time","Em"],"xlabel":"Time [s]",\
-                "ylabel":"Em [keV]","savefig":"2d_time_energy.png"}
-        time_plot = {"projection":"Time","xlabel":"Time [s]",\
-                "ylabel":"Counts","savefig":"time_binning.pdf"}
-        energy_plot = {"projection":"Em","xlabel":"Em [keV]",\
-                "ylabel":"Counts","savefig":"energy_binning.pdf"}
-        phi_plot = {"projection":"Phi","xlabel":"Phi [deg]",\
-                "ylabel":"Counts","savefig":"phi_binning.pdf"}
-        psichi_plot = {"projection":"PsiChi",\
-                "xlabel":"PsiChi [HEALPix ring pixel number]",\
-                "ylabel":"Counts","savefig":"psichi_binning.pdf"}
-        
+        time_energy_plot = {"projection":["Time","Em"],"xlabel":"Time [s]",
+                            "ylabel":"Em [keV]","savefig":"2d_time_energy.png"}
+        time_plot = {"projection":"Time","xlabel":"Time [s]",
+                     "ylabel":"Counts","savefig":"time_binning.pdf"}
+        energy_plot = {"projection":"Em","xlabel":"Em [keV]",
+                       "ylabel":"Counts","savefig":"energy_binning.pdf"}
+        phi_plot = {"projection":"Phi","xlabel":"Phi [deg]",
+                    "ylabel":"Counts","savefig":"phi_binning.pdf"}
+        psichi_plot = {"projection":"PsiChi",
+                       "xlabel":"PsiChi [HEALPix ring pixel number]",
+                       "ylabel":"Counts","savefig":"psichi_binning.pdf"}
+
         # Make plots:
-        plot_list = [time_energy_plot,time_plot,energy_plot,phi_plot,psichi_plot]
+        plot_list = (time_energy_plot,time_plot,energy_plot,phi_plot,psichi_plot)
         for each in plot_list:
-            self.binned_data.project(each["projection"]).plot()
+            if each["projection"] == "PsiChi":
+                coordsys = self.binned_data.axes['PsiChi'].coordsys
+                logger.info(f"plotting psichi map in {coordsys.name}...")
+                self.binned_data.project(each["projection"]).plot(coord = 'G', ax_kw = {'coord':'G'})
+            else:
+                self.binned_data.project(each["projection"]).plot()
             plt.xlabel(each["xlabel"],fontsize=12)
             plt.ylabel(each["ylabel"], fontsize=12)
             plt.savefig(each["savefig"])
-            plt.show()
-            plt.close() 
- 
-        return
+            if show_plots:
+                plt.show()
+            plt.close()
 
-    def plot_psichi_map(self):
-        
+    def plot_psichi_map(self, binned_data=None, show_plots=True):
+
         """
         Plot psichi healpix map.
+
+        Parameters
+        ----------
+        binned_data : histpy:Histogram, optional
+            Name of binned histogram to use.
+        show_plots : bool, optional
+            Option to show plot (default is True).
         """
 
-        print("plotting psichi in Galactic coordinates...")
-        plot, ax = self.binned_data.project('PsiChi').plot(ax_kw = {'coord':'G'})
+        # Option to read in binned data from hdf5 file:
+        if binned_data:
+            self.load_binned_data_from_hdf5(binned_data)
+
+        # Get psichi coordinate frame:
+        coordsys = self.binned_data.axes['PsiChi'].coordsys
+        logger.info(f"plotting psichi map in {coordsys.name}...")
+
+        plot, ax = self.binned_data.project('PsiChi').plot(coord = 'G', ax_kw = {'coord':'G'})
+
         ax.get_figure().set_figwidth(4)
         ax.get_figure().set_figheight(3)
         plt.title("PsiChi Binning (counts)")
         plt.savefig("psichi_default.png",bbox_inches='tight')
-        plt.show()
+        if show_plots:
+            plt.show()
         plt.close()
 
-        return
-
-    def plot_psichi_map_slices(self, Em, phi, output, binned_data=None, coords=None):
+    def plot_psichi_map_slices(self, Em, phi, output, binned_data=None,
+                               coords=None, show_plots=True):
 
         """Plot psichi map in slices of Em and phi.
-        
+
         Parameters
         ----------
-        Em : int 
+        Em : int
             Bin of energy slice.
-        phi : int 
+        phi : int
             Bin of phi slice.
         output : str
-            Prefix of output plot. 
+            Prefix of output plot.
         binned_data : histpy:Histogram, optional
-            Name of binned histogram to use. 
+            Name of binned histogram to use.
         coords : list, optional
-            Coordinates of source position. Galactic longitude and 
-            latidude for Galactic coordinates. Azimuthal and latitude 
-            for local coordinates. 
+            Coordinates of source position. Galactic longitude and
+            latidude for Galactic coordinates. Azimuthal and latitude
+            for local coordinates.
+        show_plots : bool, optional
+            Option to show plots (default is True).
         """
 
         # Option to read in binned data from hdf5 file:
@@ -300,7 +327,7 @@ class BinnedData(UnBinnedData):
         # Make healpix map with binned data slice:
         h = self.binned_data.project('Em', 'Phi', 'PsiChi').slice[{'Em':Em, 'Phi':phi}].project('PsiChi')
         m = HealpixMap(base = HealpixBase(npix = h.nbins), data = h.contents.todense())
-        
+
         # Plot standard view:
         plot,ax = m.plot('mollview')
         if coords:
@@ -308,8 +335,9 @@ class BinnedData(UnBinnedData):
         ax.coords.grid(True, color='grey', ls='dotted')
         ax.get_figure().set_figwidth(6)
         ax.get_figure().set_figheight(3)
-        plt.savefig("%s.pdf" %output,bbox_inches='tight')
-        plt.show()
+        plt.savefig(f"{output}.pdf",bbox_inches='tight')
+        if show_plots:
+            plt.show()
         plt.close()
 
         # Plot rotated view:
@@ -319,92 +347,194 @@ class BinnedData(UnBinnedData):
             ax.coords.grid(True, color='grey', ls='dotted')
             ax.get_figure().set_figwidth(6)
             ax.get_figure().set_figheight(3)
-            plt.savefig("%s_rotated.pdf" %output,bbox_inches='tight')
-            plt.show()
+            plt.savefig(f"{output}_rotated.pdf",bbox_inches='tight')
+            if show_plots:
+                plt.show()
             plt.close()
 
-        return
+    def make_basic_plot(self, x, y, plt_scale='loglog', output_name=None,
+                        x_error=[], plot_kwargs={}, fig_kwargs={},
+                        show_plots=True):
 
-    def get_raw_spectrum(self, binned_data=None, time_rate=False, output_name=None):
+        """Make a basic plot.
 
-        """Calculates raw spectrum of binned data, plots, and writes to file. 
-        
+        Parameters
+        ----------
+        x : list or array
+            x-axis data to be plotted
+        y : list or array
+            y-axis data to be plotted
+        plt_scale : str, optional
+            scale of axes: loglog, semilogx, or semilogy.
+            Default is loglog.
+        x_error : list or array, optional
+            x error bars
+        output_name : str, optional
+            Prefix of saved figure (default is None).
+        plot_kwargs : dict, optional
+            Pass any kwargs to plt.plot().
+        fig_kwargs : dict, optional
+            Pass any kwargs to plt.gca().set().
+        show_plots : bool
+            Wether or not to show plot (default is True).
+        """
+
+        # Setup figure:
+        ax = plt.gca()
+
+        # Main plot:
+        if plt_scale == "loglog":
+            plt.loglog(x, y, **plot_kwargs)
+        if plt_scale == "semilogx":
+            plt.semilogx(x, y, **plot_kwargs)
+        if plt_scale == "semilogy":
+            plt.semilogy(x, y, **plot_kwargs)
+
+        # Include x error bars:
+        if len(x_error) != 0:
+
+            # Remove label if defined:
+            if "label" in plot_kwargs.keys():
+                plot_kwargs["label"] = "_nolabel_"
+
+            plt.errorbar(x, y, xerr=x_error, **plot_kwargs)
+
+        # axes and labels:
+        plt.grid(color="grey",alpha=0.3,ls="--")
+        ax.set(**fig_kwargs)
+        if "label" in plot_kwargs.keys():
+            plt.legend(loc=1,frameon=True)
+
+        # Save and show:
+        if output_name is not None:
+            plt.savefig(f"{output_name}.pdf")
+        if show_plots:
+            plt.show()
+        plt.close()
+
+    def get_raw_spectrum(self, binned_data=None, time_rate=False, output_name=None, show_plots=False):
+
+        """Calculates raw spectrum of binned data, plots, and writes to file.
+
         Parameters
         ----------
         binned_data : str, optional
             Name of binnned hdf5 data file.
         output_name : str, optional
-            Prefix of output files. Writes both pdf and dat file. 
+            Prefix of output files. Writes both pdf and dat file.
         time_rate : bool, optional
-            If True, calculates ct/keV/s. The defualt is ct/keV. 
+            If True, calculates ct/keV/s. The defualt is ct/keV.
+        show_plot : bool, optional
+            Wether or not to show plot (default is False).
         """
 
-        # Make print statement:
-        print("getting raw spectrum...")
+        # Log message:
+        logger.info("getting raw spectrum...")
 
         # Option to read in binned data from hdf5 file:
         if binned_data:
             self.load_binned_data_from_hdf5(binned_data)
-            self.get_binning_info() 
+            self.get_binning_info()
 
         # Option to normalize by total time:
-        if time_rate==False:
+        if not time_rate:
             raw_rate = self.energy_hist/self.energy_bin_widths
-            ylabel = "$\mathrm{ct \ keV^{-1}}$"
+            ylabel = "$\\mathrm{ct \\ keV^{-1}}$"
             data_label = "Rate[ct/keV]"
-        if time_rate==True:
+        else:
             raw_rate = self.energy_hist/self.energy_bin_widths/self.total_time
-            ylabel = "$\mathrm{ct \ keV^{-1} \ s^{-1}}$"
+            ylabel = "$\\mathrm{ct \\ keV^{-1} \\ s^{-1}}$"
             data_label = "Rate[ct/keV/s]"
 
         # Plot:
         plot_kwargs = {"label":"raw spectrum", "ls":"", "marker":"o", "color":"black"}
         fig_kwargs = {"xlabel":"Energy [keV]", "ylabel":ylabel}
-        MakePlots().make_basic_plot(self.energy_bin_centers, raw_rate,\
-            x_error=self.energy_bin_widths/2.0, savefig="%s.pdf" %output_name,\
-            plot_kwargs=plot_kwargs, fig_kwargs=fig_kwargs)
+        self.make_basic_plot(self.energy_bin_centers, raw_rate,
+                             x_error=self.energy_bin_widths/2.0,
+                             output_name=output_name,
+                             plot_kwargs=plot_kwargs,
+                             fig_kwargs=fig_kwargs,
+                             show_plots=show_plots)
 
         # Write data:
-        if output_name != None:
+        if output_name is not None:
             d = {"Energy[keV]":self.energy_bin_centers,data_label:raw_rate}
             df = pd.DataFrame(data=d)
-            df.to_csv("%s.dat" %output_name,float_format='%10.5e',index=False,sep="\t",columns=["Energy[keV]",data_label])
-        
-        return
+            df.to_csv(f"{output_name}.dat",float_format='%10.5e',index=False,
+                      sep="\t",columns=["Energy[keV]",data_label])
 
-    def get_raw_lightcurve(self, binned_data=None, output_name=None):
+    def get_raw_lightcurve(self, binned_data=None, output_name=None, show_plots=False):
 
         """Calculates raw lightcurve of binned data, plots, and writes data to file.
-        
+
         Parameters
         ----------
         binned_data : str, optional
             Name of binnned hdf5 data file to use.
         output_name : str, optional
-            Prefix of output files. Writes both pdf and dat file. 
+            Prefix of output files. Writes both pdf and dat file.
+        show_plots : bool, optional
+            Wether or not to show plot (default is False).
         """
 
-        # Make print statement:
-        print("getting raw lightcurve...")
+        # Log message:
+        logger.info("getting raw lightcurve...")
 
         # Option to read in binned data from hdf5 file:
         if binned_data:
             self.load_binned_data_from_hdf5(binned_data)
-            self.get_binning_info() 
-        
+            self.get_binning_info()
+
         # Calculate raw light curve:
         raw_lc = self.time_hist/self.time_bin_widths
 
         # Plot:
         plot_kwargs = {"ls":"-", "marker":"", "color":"black", "label":"raw lightcurve"}
-        fig_kwargs = {"xlabel":"Time [s]", "ylabel":"Rate [$\mathrm{ct \ s^{-1}}$]"}
-        MakePlots().make_basic_plot(self.time_bin_centers - self.time_bin_centers[0], raw_lc,\
-            savefig="%s.pdf" %output_name, plt_scale="semilogy", plot_kwargs=plot_kwargs, fig_kwargs=fig_kwargs)
-            
+        fig_kwargs = {"xlabel":"Time [s]", "ylabel":"Rate [$\\mathrm{ct \\ s^{-1}}$]"}
+        self.make_basic_plot(self.time_bin_centers - self.time_bin_centers[0], raw_lc,
+                             output_name=output_name, plt_scale="semilogy",
+                             plot_kwargs=plot_kwargs, fig_kwargs=fig_kwargs,
+                             show_plots=show_plots)
+
         # Write data:
-        if output_name != None:
+        if output_name is not None:
             d = {"Time[UTC]":self.time_bin_centers,"Rate[ct/s]":self.time_hist/self.time_bin_widths}
             df = pd.DataFrame(data=d)
-            df.to_csv("%s.dat" %output_name,index=False,sep="\t",columns=["Time[UTC]","Rate[ct/s]"])
+            df.to_csv(f"{output_name}.dat",index=False,sep="\t",columns=["Time[UTC]","Rate[ct/s]"])
 
-        return
+    def get_em_cds(self):
+        return EmCDSBinnedData(self.binned_data.project('Em', 'Phi', 'PsiChi'))
+
+class EmCDSBinnedData(BinnedDataInterface):
+    """
+    Measured energy (Em), Compton polar scattering angle (Phi), and the scattering direction (PsiChi).
+    Phi and PsiChi are the Compton Data Space (CDS). No time dependence
+    """
+    def __init__(self, data:Histogram):
+
+        # Checks
+        if set(data.axes.labels) != {'Em', 'Phi', 'PsiChi'}:
+            raise ValueError(f"Wrong axes. 'Em', 'Psi', 'PsiChi' expected.")
+
+        if not data.axes['Em'].unit.is_equivalent(u.keV):
+            raise ValueError(f"Em axis should have units of energy")
+
+        if not data.axes['Phi'].unit.is_equivalent(u.deg):
+            raise ValueError(f"Psi axis should have angle units")
+
+        if not isinstance(data.axes['PsiChi'],HealpixAxis):
+            raise ValueError(f"PsiChi must be of type {HealpixAxis}.")
+
+        if data.axes['PsiChi'].coordsys is None:
+            raise ValueError(f"PsiChi axes must have a coordinate system.")
+
+        self._data = data
+
+    @property
+    def data(self) -> Histogram:
+        return self._data
+    @property
+    def axes(self) -> Axes:
+        return self._data.axes
+
+
