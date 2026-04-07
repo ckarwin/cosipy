@@ -2,7 +2,6 @@ import logging
 import numpy as np
 from astropy.io import fits
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class PhaseAssigner:
