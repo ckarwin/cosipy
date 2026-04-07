@@ -18,7 +18,7 @@ class PhaseSelector:
         self.intervals = self._validate_intervals(intervals)
 
     def _validate_intervals(self, intervals):
-        """Ensures all phase values are strictly within [0, 1]."""
+        """Ensures all phase values are strictly within [0, 1] and start < stop."""
         if not isinstance(intervals, list):
             intervals = [intervals]
             
@@ -26,6 +26,11 @@ class PhaseSelector:
         for start, stop in intervals:
             if not (0.0 <= start <= 1.0 and 0.0 <= stop <= 1.0):
                 raise ValueError(f"Phase boundaries must be between 0 and 1. Got: ({start}, {stop})")
+            
+            # Enforce start < stop as requested
+            if start >= stop:
+                raise ValueError(f"Start phase must be strictly less than stop phase. Got: ({start}, {stop})")
+                
             validated.append((float(start), float(stop)))
         return validated
 
@@ -34,13 +39,8 @@ class PhaseSelector:
         combined_mask = np.zeros(phases.shape, dtype=bool)
         
         for pstart, pstop in self.intervals:
-            if pstart <= pstop:
-                # Normal range
-                mask = (phases >= pstart) & (phases <= pstop)
-            else:
-                # Wrap-around range (e.g., 0.9 to 0.1)
-                mask = (phases >= pstart) | (phases <= pstop)
-            
+            # Removed wrap-around logic; using linear range only
+            mask = (phases >= pstart) & (phases <= pstop)
             combined_mask |= mask
             
         return combined_mask
@@ -77,4 +77,4 @@ class PhaseSelector:
             hdul_new.writeto(output_filename, overwrite=True)
             logger.info("Successfully saved.")
         except Exception as e:
-            logger.error(f"Failed to save FITS: {e}")
+            logger.error(f"Failed to save FITS file: {e}")
