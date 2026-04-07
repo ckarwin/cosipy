@@ -4,10 +4,29 @@ from matplotlib.gridspec import GridSpec
 
 class PlotPulseProfile:
     """
-    Generates a 3-panel figure: Pulse Profile, Phaseogram, and Significance Test.
-    Optimized for direct FITS table input (vectorized).
+    Generates a diagnostic 3-panel visualization for pulsar timing analysis.
+    
+    This class creates a standardized figure containing:
+    1. An Integrated Pulse Profile (histogram of counts vs. phase).
+    2. A Phaseogram (2D heatmap of phase vs. time to check signal stability).
+    3. A Cumulative Significance Test ($Z^2_2$ statistic) to track signal growth.
+
+    The implementation is optimized for performance using NumPy vectorization 
+    to handle large event lists directly from FITS tables.
     """
     def __init__(self, data, n_bins=50, n_time_bins=50):
+        """
+        Initializes the plotter with event data and binning configurations.
+
+        Args:
+            data (astropy.table.Table or FITS_rec): Structured data containing 
+                at least a 'PULSE_PHASE' column and a time column 
+                ('TimeTags' or 'TIME').
+            n_bins (int): Number of phase bins for the profile and phaseogram. 
+                Defaults to 50.
+            n_time_bins (int): Number of vertical time intervals for the 
+                phaseogram. Defaults to 50.
+        """
         self.n_bins = n_bins
         self.n_time_bins = n_time_bins
         
@@ -27,6 +46,20 @@ class PlotPulseProfile:
             self.times = np.zeros(len(self.phases))
 
     def plot(self, t_start_met=None):
+        """
+        Renders the 3-panel pulsar diagnostic plot.
+
+        Calculates an integrated profile over two cycles for visual continuity, 
+        generates a 2D phaseogram histogram, and computes the cumulative 
+        $Z^2_2$ (H-test variant) significance over time.
+
+        Args:
+            t_start_met (float, optional): The reference Mission Elapsed Time (MET) 
+                to use as T=0. If None, the minimum time in the dataset is used.
+
+        Returns:
+            None: Displays the matplotlib figure directly.
+        """
         if len(self.phases) == 0:
             print("No valid events to plot.")
             return
@@ -48,6 +81,8 @@ class PlotPulseProfile:
         ax_phaseogram = fig.add_subplot(gs[:, 1])
 
         # --- Panel 1: Integrated Profile (Top Left) ---
+        # A 2-cycle plot is used to ensure peaks at phase 0.0 or 1.0 are 
+        # clearly visible without being cut off by the plot boundary.
         counts, edges = np.histogram(self.phases, bins=self.n_bins, range=(0, 1))
         centers = (edges[:-1] + edges[1:]) / 2
         
@@ -63,6 +98,8 @@ class PlotPulseProfile:
         ax_prof.grid(alpha=0.3)
 
         # --- Panel 2: Phaseogram (Right) ---
+        # Visualizes the persistence of the pulse signal over the observation duration.
+        # Vertical stripes indicate a stable, well-timed pulsar signal.
         h2d, xedges, yedges = np.histogram2d(
             self.phases, t_elapsed, 
             bins=[self.n_bins, self.n_time_bins], 
@@ -78,6 +115,9 @@ class PlotPulseProfile:
         plt.colorbar(im, ax=ax_phaseogram, label="Counts/bin")
 
         # --- Panel 3: Significance (Bottom Left) ---
+        # Computes the cumulative Z-squared statistic with 2 harmonics.
+        # A steady upward slope indicates a real detection, whereas a 
+        # flat or fluctuating line suggests noise.
         if len(t_elapsed) > 1:
             sort_idx = np.argsort(t_elapsed)
             sorted_phases = self.phases[sort_idx] * 2 * np.pi 
