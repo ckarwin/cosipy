@@ -12,15 +12,16 @@ class PlotPulseProfile:
     3. A Cumulative Significance Test ($Z^2_2$ statistic) to track signal growth.
 
     The implementation is optimized for performance using NumPy vectorization 
-    to handle large event lists directly from FITS tables.
+    to handle large event lists directly from FITS tables or NumPy arrays.
     """
+
     def __init__(self, data, n_bins=50, n_time_bins=50):
         """
         Initializes the plotter with event data and binning configurations.
 
         Args:
-            data (astropy.table.Table or FITS_rec): Structured data containing 
-                at least a 'PULSE_PHASE' column and a time column 
+            data (astropy.table.Table, FITS_rec, or np.ndarray): Structured data 
+                containing at least a 'PULSE_PHASE' column and a time column 
                 ('TimeTags' or 'TIME').
             n_bins (int): Number of phase bins for the profile and phaseogram. 
                 Defaults to 50.
@@ -30,25 +31,28 @@ class PlotPulseProfile:
         self.n_bins = n_bins
         self.n_time_bins = n_time_bins
         
-        # --- VECTORIZED DATA EXTRACTION ---
-        try:
-            self.phases = np.array(data['PULSE_PHASE'])
-        except (KeyError, TypeError):
-            print("Error: 'PULSE_PHASE' column not found in data.")
-            self.phases = np.array([])
-        # Robust column-name extraction for different data types
+        # --- ROBUST COLUMN DETECTION ---
+        # Checks both .dtype.names (NumPy) and .names (Astropy/FITS)
         if hasattr(data, "dtype") and getattr(data.dtype, "names", None) is not None:
-            cols = list(data.dtype.names)          # numpy structured array
+            cols = list(data.dtype.names)
         elif hasattr(data, "names"):
-            cols = list(data.names)                # e.g., astropy Table / FITS recarray
+            cols = list(data.names)
         else:
             cols = []
-        # Handle various possible time column names
-        if 'TimeTags' in data.names:
-            self.times = np.array(data['TimeTags'])
-        elif 'TIME' in data.names:
-            self.times = np.array(data['TIME'])
+
+        # --- DATA EXTRACTION ---
+        if 'PULSE_PHASE' in cols:
+            self.phases = np.asarray(data['PULSE_PHASE'])
         else:
+            print("Error: 'PULSE_PHASE' column not found in data.")
+            self.phases = np.array([])
+
+        if 'TimeTags' in cols:
+            self.times = np.asarray(data['TimeTags'])
+        elif 'TIME' in cols:
+            self.times = np.asarray(data['TIME'])
+        else:
+            # Fallback if no time column is found
             self.times = np.zeros(len(self.phases))
 
     def plot(self, t_start_met=None):
@@ -64,11 +68,11 @@ class PlotPulseProfile:
                 to use as T=0. If None, the minimum time in the dataset is used.
 
         Returns:
-            None: Displays the matplotlib figure directly.
+            matplotlib.figure.Figure: The generated figure object.
         """
         if len(self.phases) == 0:
             print("No valid events to plot.")
-            return
+            return None
 
         # Relative Time Calculation
         if t_start_met is None:
@@ -87,8 +91,6 @@ class PlotPulseProfile:
         ax_phaseogram = fig.add_subplot(gs[:, 1])
 
         # --- Panel 1: Integrated Profile (Top Left) ---
-        # A 2-cycle plot is used to ensure peaks at phase 0.0 or 1.0 are 
-        # clearly visible without being cut off by the plot boundary.
         counts, edges = np.histogram(self.phases, bins=self.n_bins, range=(0, 1))
         centers = (edges[:-1] + edges[1:]) / 2
         
@@ -104,8 +106,7 @@ class PlotPulseProfile:
         ax_prof.grid(alpha=0.3)
 
         # --- Panel 2: Phaseogram (Right) ---
-        # Visualizes the persistence of the pulse signal over the observation duration.
-        # Vertical stripes indicate a stable, well-timed pulsar signal.
+        
         h2d, xedges, yedges = np.histogram2d(
             self.phases, t_elapsed, 
             bins=[self.n_bins, self.n_time_bins], 
@@ -121,9 +122,6 @@ class PlotPulseProfile:
         plt.colorbar(im, ax=ax_phaseogram, label="Counts/bin")
 
         # --- Panel 3: Significance (Bottom Left) ---
-        # Computes the cumulative Z-squared statistic with 2 harmonics.
-        # A steady upward slope indicates a real detection, whereas a 
-        # flat or fluctuating line suggests noise.
         if len(t_elapsed) > 1:
             sort_idx = np.argsort(t_elapsed)
             sorted_phases = self.phases[sort_idx] * 2 * np.pi 
@@ -131,18 +129,13 @@ class PlotPulseProfile:
             
             # Cumulative Z^2_2 statistic (2 harmonics)
             ns = np.arange(1, len(sorted_phases) + 1)
-            
-            # First harmonic (k=1)
             cum_cos1 = np.cumsum(np.cos(sorted_phases))
             cum_sin1 = np.cumsum(np.sin(sorted_phases))
-            
-            # Second harmonic (k=2)
             cum_cos2 = np.cumsum(np.cos(2 * sorted_phases))
             cum_sin2 = np.cumsum(np.sin(2 * sorted_phases))
             
             z2_stats = (2.0 / ns) * (cum_cos1**2 + cum_sin1**2 + cum_cos2**2 + cum_sin2**2)
             
-            # Downsample for plotting performance if data is massive
             step = max(1, len(z2_stats) // 2000)
             ax_htest.plot(sorted_times[::step], z2_stats[::step], '-', color='rebeccapurple', lw=1.5)
         
@@ -152,4 +145,4 @@ class PlotPulseProfile:
         ax_htest.grid(alpha=0.3)
 
         plt.tight_layout()
-        plt.show()
+        return fig
