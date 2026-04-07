@@ -933,7 +933,7 @@ class SpacecraftHistory:
 
         Parameters
         ----------
-        target_coord:
+        target_coord: SkyCoord
           source direction
 
         Returns
