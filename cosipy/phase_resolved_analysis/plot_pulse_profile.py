@@ -127,7 +127,8 @@ class PlotPulseProfile:
             sorted_phases = self.phases[sort_idx] * 2 * np.pi 
             sorted_times = t_elapsed[sort_idx]
             
-            # Cumulative Z^2_2 statistic (2 harmonics)
+            # Cumulative Z^2_2 statistic (2 harmonics)   
+            #TODO: We will make the maximum harmonic number a parameter in the future
             ns = np.arange(1, len(sorted_phases) + 1)
             cum_cos1 = np.cumsum(np.cos(sorted_phases))
             cum_sin1 = np.cumsum(np.sin(sorted_phases))
