@@ -857,8 +857,13 @@ class SpacecraftHistory:
         # changed the format.  Bring it back
         new_obstime.format = self.obstime.format
 
-        return self.__class__(new_obstime, new_attitude, new_location,
-                              new_livetime)
+        new_history = self.__class__(new_obstime, new_attitude, new_location,
+                                     new_livetime)
+
+        # make sure new object uses same earth occ caching as old object
+        new_history.cache_earth_occ = self.cache_earth_occ
+
+        return new_history
 
     def apply_gti(self, gti: GoodTimeInterval) -> "SpacecraftHistory":
         """
@@ -908,7 +913,13 @@ class SpacecraftHistory:
         new_attitude = Attitude.from_matrix(new_attitude, frame=self._attitude.frame)
         new_obstime.format = self.obstime.format
 
-        return self.__class__(new_obstime, new_attitude, new_location, new_livetime)
+        new_history = self.__class__(new_obstime, new_attitude, new_location,
+                                     new_livetime)
+
+        # make sure new object uses same earth occ caching as old object
+        new_history.cache_earth_occ = self.cache_earth_occ
+
+        return new_history
 
     def get_earth_occ(self, target_coord: SkyCoord):
         """
