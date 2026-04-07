@@ -36,7 +36,13 @@ class PlotPulseProfile:
         except (KeyError, TypeError):
             print("Error: 'PULSE_PHASE' column not found in data.")
             self.phases = np.array([])
-
+        # Robust column-name extraction for different data types
+        if hasattr(data, "dtype") and getattr(data.dtype, "names", None) is not None:
+            cols = list(data.dtype.names)          # numpy structured array
+        elif hasattr(data, "names"):
+            cols = list(data.names)                # e.g., astropy Table / FITS recarray
+        else:
+            cols = []
         # Handle various possible time column names
         if 'TimeTags' in data.names:
             self.times = np.array(data['TimeTags'])
