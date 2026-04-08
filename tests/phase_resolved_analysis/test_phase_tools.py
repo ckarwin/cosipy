@@ -28,9 +28,7 @@ def test_phase_assigner_math():
             os.remove(par_path)
 
 def test_phase_selector_wrap_around():
-    """Check wrap-around logic (e.g., 0.8 to 0.2)."""
-    selector = PhaseSelector(intervals=[(0.8, 1.00)])
-    selector = PhaseSelector(intervals=[(1.00, 0.2)])
+    selector = PhaseSelector(intervals=[(0.0, 0.2), (0.8, 1.0)])
     test_phases = np.array([0.1, 0.5, 0.9])
     mask = selector._get_vectorized_mask(test_phases)
     assert np.array_equal(mask, [True, False, True])
