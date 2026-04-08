@@ -23,7 +23,7 @@ from astromodels import (
 
 from cosipy.threeml.custom_functions import Band_Eflux
 
-
+from cosipy.response.functions import get_spectrum_unit
 from cosipy.response.integrals import get_integral_values
 
 def test_integrate():
@@ -190,3 +190,35 @@ def test_integrate():
 
     v = get_integral_values(delta, x, force_quad=True) # ignored for Delta
     assert np.allclose(v, v0)
+
+
+def test_spectrum_unit():
+
+    from astromodels import Function1D, FunctionMeta
+    import astropy.units as u
+
+    # test that we can get the unit from a custom function that
+    # has never been seen before, provided that the unit is assigned
+    # to the K parameter
+
+    class MyFunction(Function1D, metaclass=FunctionMeta):
+        r"""
+        description :
+            a silly function
+        parameters:
+            K :
+              desc: Normalization
+              initial value : 1.0
+              is_normalization : True
+              unit : keV
+        """
+        def _set_units(self, x_unit, y_unit):
+            # this is never actually called during setup
+            pass
+
+        def evaluate(self, x, K):
+            return K * x
+
+    f = MyFunction()
+    unit = get_spectrum_unit(f)
+    assert unit == u.keV
