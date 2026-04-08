@@ -166,7 +166,6 @@ def test_spectrum_unit_generic():
             K :
               desc: Normalization
               initial value : 1.0
-              is_normalization : True
               unit : keV
         """
         def _set_units(self, x_unit, y_unit):
@@ -188,7 +187,6 @@ def test_spectrum_unit_generic():
             k :
               desc: Normalization
               initial value : 1.0
-              is_normalization : True
               unit : keV
         """
         def _set_units(self, x_unit, y_unit):
