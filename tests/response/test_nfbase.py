@@ -84,7 +84,7 @@ def test_flow_builders():
 @patch("torch.load")
 @patch("torch.multiprocessing.get_context")
 def test_nfbase_lifecycle(mock_get_context, mock_load):
-    
+    """Test full lifecycle of NFBase class."""
     mock_load.return_value = {
         'version': '1.0.0',
         'density_input': {'feature_dim': 10},
@@ -203,6 +203,7 @@ def test_nfbase_sampling_orchestration(mock_get_context, mock_load):
 @patch("torch.load")
 @patch("torch.multiprocessing.get_context")
 def test_sample_density_temp_pool_logic(mock_get_context, mock_load):
+    """Tests sample_density temp pool creation, shutdown, and error handling."""
     mock_load.return_value = {'version': '1.0.0', 'density_input': {}}
     mock_ctx = MagicMock()
     mock_get_context.return_value = mock_ctx
@@ -491,6 +492,7 @@ class DummyBaseModel(BaseModel):
         return 2
 
 def test_basemodel_batch_size():
+    """Test batch_size property and setter."""
     model = DummyBaseModel(compile_mode=None, batch_size=10, worker_device='cpu', input={})
     
     assert model.batch_size == 10
@@ -507,6 +509,7 @@ def test_basemodel_batch_size():
         model.batch_size = "10"
 
 def test_basemodel_compile_mode_caching():
+    """Test compile_mode property and setter."""
     model = DummyBaseModel(compile_mode=None, batch_size=10, worker_device='cpu', input={})
     
     assert model.compile_mode is None
@@ -547,6 +550,7 @@ class DummyRateModel(RateModel):
         return torch.tensor([1.0])
 
 def test_rate_model_initialization():
+    """Test RateModel initialization."""
     model = DummyRateModel(rate_input={"test": 1})
     assert model.unpacked is True
     assert model.context_dim == 1
@@ -587,6 +591,7 @@ class DummyDensityModel(DensityModel):
         return ctx, src, jac
 
 def test_density_model_sample_density():
+    """Test sample_density method."""
     model = DummyDensityModel(compile_mode=None, batch_size=4, worker_device='cpu', input={})
     
     model._model_op.return_value = torch.ones(4, model.source_dim)
@@ -603,6 +608,7 @@ def test_density_model_sample_density():
     assert result_no_cb.shape == (10, 3)
 
 def test_density_model_evaluate_density():
+    """Test evaluate_density method."""
     model = DummyDensityModel(compile_mode=None, batch_size=5, worker_device='cpu', input={})
     
     model._model_op.return_value = torch.full((5,), 5.0) 
@@ -629,6 +635,7 @@ class DummyDensityApproximation(DensityApproximation):
         self._expected_source_dim = 3
 
 def test_density_approximation_evaluate_density():
+    """Test evaluate_density method."""
     approx = DummyDensityApproximation(1, {}, 'cpu', 10, None)
     
     context = torch.randn(10, 2)
@@ -648,6 +655,7 @@ def test_density_approximation_evaluate_density():
         approx.evaluate_density(context, bad_source)
 
 def test_density_approximation_sample_density():
+    """Test sample_density method."""
     approx = DummyDensityApproximation(1, {}, 'cpu', 10, None)
     
     context = torch.randn(10, 2)
