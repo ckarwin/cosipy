@@ -87,7 +87,7 @@ class TimeSelector(EventSelectorInterface):
             self._tstop_list = None
         else:
             self._tstart_list = (tstart - self._t0).jd if tstart is not None else None
-            self._tstop_list = (tstop - - self._t0).jd if tstop is not None else None
+            self._tstop_list = (tstop - self._t0).jd if tstop is not None else None
 
         self._batch_size = batch_size
 
