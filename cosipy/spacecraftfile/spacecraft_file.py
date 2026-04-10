@@ -291,8 +291,7 @@ class SpacecraftHistory:
     @staticmethod
     def _find_time_index(time:Time, tstart:Time, tstop:Time):
 
-        if time.shape == ():
-            # Scalar
+        if time.isscalar:
             t0 = time
         else:
             t0 = time[0]
