@@ -10,12 +10,7 @@ from cosipy.data_io.EmCDSUnbinnedData import TimeTagEmCDSEventInSCFrameInterface
 from cosipy.interfaces.background_interface import BackgroundDensityInterface
 from cosipy.util.iterables import asarray
 
-from importlib.util import find_spec
-
-if find_spec("torch") is None:
-    raise RuntimeError("Install cosipy with [ml] optional package to use this feature.")
-
-from cosipy.background_estimation.NFBackground import NFBackground
+from cosipy.background_estimation.ml.NFBackground import NFBackground
 import torch
 
 class FreeNormNFUnbinnedBackground(BackgroundDensityInterface):

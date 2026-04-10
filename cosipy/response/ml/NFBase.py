@@ -5,17 +5,11 @@ import numpy as np
 from tqdm.auto import tqdm
 import queue
 
-
-from importlib.util import find_spec
-
-if any(find_spec(pkg) is None for pkg in ["torch", "normflows"]):
-    raise RuntimeError("Install cosipy with [ml] optional package to use this feature.")
-
 import torch
 from torch import nn
 import torch.multiprocessing as mp
 import normflows as nf
-import cosipy.response.NFWorkerState as NFWorkerState
+import cosipy.response.ml.NFWorkerState as NFWorkerState
 
 
 CompileMode = Optional[Literal["default", "reduce-overhead", "max-autotune", "max-autotune-no-cudagraphs"]]
@@ -58,6 +52,8 @@ class NNDensityInferenceWrapper(nn.Module):
                 return self._model.sample(num_samples=n_samples)[0]
             else:
                 return self._model.sample(num_samples=n_samples, context=context)[0]
+        else:
+            raise ValueError(f"Unknown mode: {mode}. Expected 'inference' or 'sampling'.")
 
 class ConditionalDiagGaussian(nf.distributions.BaseDistribution):
     def __init__(self, shape: Union[int, List[int], Tuple[int, ...]], context_encoder: nn.Module):
@@ -318,6 +314,8 @@ def update_density_worker_settings(args: Tuple[str, Union[int, CompileMode]]):
         NFWorkerState.density_module._model.batch_size = value
     elif attr == 'density_compile_mode':
         NFWorkerState.density_module._model.compile_mode = value
+    else:
+        raise ValueError(f"Unknown attribute: {attr}")
 
 def init_density_worker(device_queue: mp.Queue, progress_queue: mp.Queue, major_version: int,
                         density_input: Dict, density_batch_size: int,
@@ -384,9 +382,6 @@ class NFBase():
             self.devices = devices
         else:
             self._devices = []
-            
-    def __del__(self):
-        self.shutdown_compute_pool()
         
     @property
     def show_progress(self) -> bool:
@@ -449,16 +444,17 @@ class NFBase():
             self._pool.map(cuda_cleanup_task, range(self._num_workers))
         
     def shutdown_compute_pool(self):
-        if self._pool:
+        if self._pool is not None:
             self._pool.close()
             self._pool.join()
+        self._pool = None
         
         self._num_workers = 0
-        self._pool = None
         self._has_cuda = None
-            
-        self._progress_queue.close()
-        self._progress_queue.join_thread()
+        
+        if self._progress_queue is not None:
+            self._progress_queue.close()
+            self._progress_queue.join_thread()
         self._progress_queue = None
     
     def init_compute_pool(self, devices: Optional[List[Union[str, int, torch.device]]]=None):

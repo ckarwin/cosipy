@@ -2,14 +2,7 @@ import numpy as np
 
 from typing import Union, Tuple, Dict
 
-
-from importlib.util import find_spec
-
-if any(find_spec(pkg) is None for pkg in ["torch", "normflows"]):
-    raise RuntimeError("Install cosipy with [ml] optional package to use this feature.")
-
-
-from cosipy.response.NFBase import CompileMode, build_c_arqs_flow, build_cmlp_diaggaussian_base, NNDensityInferenceWrapper, DensityModel, RateModel
+from cosipy.response.ml.NFBase import CompileMode, build_c_arqs_flow, build_cmlp_diaggaussian_base, NNDensityInferenceWrapper, DensityModel, RateModel
 import normflows as nf
 import torch
 

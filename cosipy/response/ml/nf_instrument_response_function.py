@@ -6,14 +6,8 @@ from cosipy.interfaces.data_interface import EmCDSEventDataInSCFrameInterface
 from cosipy.interfaces.instrument_response_interface import FarFieldSpectralInstrumentResponseFunctionInterface
 from cosipy.interfaces.photon_parameters import PhotonListWithDirectionAndEnergyInSCFrameInterface
 from cosipy.data_io.EmCDSUnbinnedData import EmCDSEventDataInSCFrameFromArrays
-from cosipy.response.NFResponse import NFResponse
+from cosipy.response.ml.NFResponse import NFResponse
 from cosipy.util.iterables import asarray
-
-
-from importlib.util import find_spec
-
-if find_spec("torch") is None:
-    raise RuntimeError("Install cosipy with [ml] optional package to use this feature.")
 
 import torch
 

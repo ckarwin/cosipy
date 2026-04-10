@@ -3,12 +3,6 @@ import healpy as hp
 
 from typing import Union, Tuple, Dict, Optional, Callable
 
-
-from importlib.util import find_spec
-
-if any(find_spec(pkg) is None for pkg in ["torch", "normflows", "sphericart.torch"]):
-    raise RuntimeError("Install cosipy with [ml] optional package to use this feature.")
-
 from .NFBase import CompileMode, build_c_arqs_flow, build_cmlp_diaggaussian_base, NNDensityInferenceWrapper, AreaModel, DensityModel
 import sphericart.torch
 import normflows as nf

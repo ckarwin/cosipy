@@ -1,17 +1,9 @@
 from typing import List, Union, Optional, Dict
 from pathlib import Path
 
-from cosipy import SpacecraftHistory
-
-
-from importlib.util import find_spec
-
-if find_spec("torch") is None:
-    raise RuntimeError("Install cosipy with [ml] optional package to use this feature.")
-
 import torch
 import torch.multiprocessing as mp
-from cosipy.response.NFBase import NFBase, CompileMode, update_density_worker_settings, init_density_worker, DensityApproximation, DensityModel, RateModel
+from cosipy.response.ml.NFBase import NFBase, CompileMode, update_density_worker_settings, init_density_worker, DensityApproximation, DensityModel, RateModel
 from .NFBackgroundModels import TotalBackgroundDensityCMLPDGaussianCARQSFlow, TotalDC4BackgroundRate
 
 
@@ -19,12 +11,13 @@ class BackgroundDensityApproximation(DensityApproximation):
 
     def _setup_model(self):
         version_map: Dict[int, DensityModel] = {
-            1: TotalBackgroundDensityCMLPDGaussianCARQSFlow(self._density_input, self._worker_device, self._batch_size, self._compile_mode),
+            1: TotalBackgroundDensityCMLPDGaussianCARQSFlow,
         }
         if self._major_version not in version_map:
             raise ValueError(f"Unsupported major version {self._major_version} for Density Approximation")
         else:    
-            self._model = version_map[self._major_version]
+            model_class = version_map[self._major_version]
+            self._model = model_class(self._density_input, self._worker_device, self._batch_size, self._compile_mode)
             self._expected_context_dim = self._model.context_dim
             self._expected_source_dim = self._model.source_dim
 
@@ -37,12 +30,13 @@ class BackgroundRateApproximation:
 
     def _setup_model(self):
         version_map: Dict[int, RateModel] = {
-            1: TotalDC4BackgroundRate(self._rate_input),
+            1: TotalDC4BackgroundRate,
         }
         if self._major_version not in version_map:
             raise ValueError(f"Unsupported major version {self._major_version} for Rate Approximation")
         else:    
-            self._model = version_map[self._major_version]
+            model_class = version_map[self._major_version]
+            self._model = model_class(self._rate_input)
             self._expected_context_dim = self._model.context_dim
     
     def evaluate_rate(self, context: torch.Tensor) -> torch.Tensor:

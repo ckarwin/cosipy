@@ -31,14 +31,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-
-from importlib.util import find_spec
-
-if find_spec("torch") is None:
-    raise RuntimeError("Install cosipy with [ml] optional package to use this feature.")
-
 import torch
-from cosipy.response.nf_instrument_response_function import UnpolarizedNFFarFieldInstrumentResponseFunction
+from cosipy.response.ml.nf_instrument_response_function import UnpolarizedNFFarFieldInstrumentResponseFunction
 
 
 class UnbinnedThreeMLPointSourceResponseIRFAdaptive(CachedUnbinnedThreeMLSourceResponseInterface):
@@ -261,7 +255,7 @@ class UnbinnedThreeMLPointSourceResponseIRFAdaptive(CachedUnbinnedThreeMLSourceR
         if new_total[0] < (new_peak_nodes[0] + 2 * new_peak_nodes[1] + 3):
             raise ValueError("Too many nodes per peak compared to the total number or peaks!")
             
-        if any(n < 1 for n in new_total):
+        if any(n < 1 for n in new_total) or any(n < 1 for n in new_peak_nodes):
             raise ValueError("The number of energy nodes must be at least 1.")
 
         if new_range[0] >= new_range[1]:
@@ -588,6 +582,8 @@ class UnbinnedThreeMLPointSourceResponseIRFAdaptive(CachedUnbinnedThreeMLSourceR
             n_res, w_res = self._scale_nodes_exp(E6, Emax, *self._nodes_bkg_3[2])
             nodes_out[indices, c:c+w] = n_res
             weights_out[indices, c:c+w] = w_res
+        else:
+            raise ValueError(f"Unknown folding mode {mode}")
 
     
     def _get_nodes(self, energy_m_keV: torch.Tensor, phi_rad: torch.Tensor, 
@@ -779,7 +775,7 @@ class UnbinnedThreeMLPointSourceResponseIRFAdaptive(CachedUnbinnedThreeMLSourceR
                              (self._irf_cache is None))
         
         if no_recalculation:
-            return
+            pass
         else:
             active_pool = True
             if isinstance(self._irf, UnpolarizedNFFarFieldInstrumentResponseFunction):
@@ -860,7 +856,7 @@ class UnbinnedThreeMLPointSourceResponseIRFAdaptive(CachedUnbinnedThreeMLSourceR
                 f.attrs['last_convolved_lon_deg'] = sc.spherical.lon.deg
                 f.attrs['last_convolved_lat_deg'] = sc.spherical.lat.deg
                 f.attrs['last_convolved_frame'] = sc.frame.name
-                if hasattr(sc, 'equinox'):
+                if hasattr(sc, 'equinox') and sc.equinox is not None:
                     f.attrs['last_convolved_equinox'] = sc.equinox.value
     
     def cache_from_file(self, filename: Union[str, Path]):

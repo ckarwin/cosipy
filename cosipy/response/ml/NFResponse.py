@@ -3,29 +3,24 @@ from pathlib import Path
 from tqdm.auto import tqdm
 import queue
 
-
-from importlib.util import find_spec
-
-if find_spec("torch") is None:
-    raise RuntimeError("Install cosipy with [ml] optional package to use this feature.")
-
 import torch
 import torch.multiprocessing as mp
 from .NFResponseModels import UnpolarizedDensityCMLPDGaussianCARQSFlow, UnpolarizedAreaSphericalHarmonicsExpansion
 from .NFBase import DensityApproximation, CompileMode, NFBase, init_density_worker, update_density_worker_settings, AreaModel, DensityModel
-import cosipy.response.NFWorkerState as NFWorkerState
+import cosipy.response.ml.NFWorkerState as NFWorkerState
 
 
 class ResponseDensityApproximation(DensityApproximation):
 
     def _setup_model(self):
         version_map: Dict[int, DensityModel] = {
-            1: UnpolarizedDensityCMLPDGaussianCARQSFlow(self._density_input, self._worker_device, self._batch_size, self._compile_mode),
+            1: UnpolarizedDensityCMLPDGaussianCARQSFlow,
         }
         if self._major_version not in version_map:
             raise ValueError(f"Unsupported major version {self._major_version} for Density Approximation")
         else:    
-            self._model = version_map[self._major_version]
+            model_class = version_map[self._major_version]
+            self._model = model_class(self._density_input, self._worker_device, self._batch_size, self._compile_mode)
             self._expected_context_dim = self._model.context_dim
             self._expected_source_dim = self._model.source_dim
 
@@ -41,12 +36,13 @@ class AreaApproximation:
 
     def _setup_model(self):
         version_map: Dict[int, AreaModel] = {
-            1: UnpolarizedAreaSphericalHarmonicsExpansion(self._area_input, self._worker_device, self._batch_size, self._compile_mode),
+            1: UnpolarizedAreaSphericalHarmonicsExpansion,
         }
         if self._major_version not in version_map:
             raise ValueError(f"Unsupported major version {self._major_version} for Effective Area Approximation")
         else:    
-            self._model = version_map[self._major_version]
+            model_class = version_map[self._major_version]
+            self._model = model_class(self._area_input, self._worker_device, self._batch_size, self._compile_mode)
             self._expected_context_dim = self._model.context_dim
     
     def evaluate_effective_area(self, context: torch.Tensor,
@@ -72,6 +68,8 @@ def update_response_worker_settings(args: Tuple[str, Union[int, CompileMode]]):
         NFWorkerState.area_module._model.batch_size = value
     elif attr == 'area_compile_mode':
         NFWorkerState.area_module._model.compile_mode = value
+    else:
+        raise ValueError(f"Unknown attribute: {attr}")
 
 def init_response_worker(device_queue: mp.Queue, progress_queue: mp.Queue, major_version: int, area_input: Dict,
                          density_input: Dict, area_batch_size: int, density_batch_size: int,
