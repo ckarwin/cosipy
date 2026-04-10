@@ -297,14 +297,9 @@ class SpacecraftHistory:
         else:
             t0 = time[0]
 
-        time = time - t0
-        time = time.jd1 + time.jd2
-
-        tstart = tstart - t0
-        tstart = tstart.jd1 + tstart.jd2
-
-        tstop = tstop - t0
-        tstop = tstop.jd1 + tstop.jd2
+        time = (time - t0).jd
+        tstart = (tstart - t0).jd
+        tstop = (tstop - t0).jd
 
         if tstart is not None:
             if tstop is not None:

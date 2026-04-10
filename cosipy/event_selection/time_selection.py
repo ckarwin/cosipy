@@ -86,14 +86,10 @@ class TimeSelector(EventSelectorInterface):
             self._tstart_list = None
             self._tstop_list = None
         else:
-            self._tstart_list = self._get_dt_jd(tstart) if tstart is not None else None
-            self._tstop_list = self._get_dt_jd(tstop)if tstop is not None else None
+            self._tstart_list = (tstart - self._t0).jd if tstart is not None else None
+            self._tstop_list = (tstop - - self._t0).jd if tstop is not None else None
 
         self._batch_size = batch_size
-
-    def _get_dt_jd(self, time: Time):
-        time = time - self._t0
-        return time.jd1 + time.jd2
 
     @classmethod
     def from_gti(cls, gti, batch_size:int = 10000):
@@ -124,7 +120,7 @@ class TimeSelector(EventSelectorInterface):
 
             # Relative time to t0
             time = Time(jd1, jd2, format = 'jd', copy = False)
-            time = self._get_dt_jd(time)
+            time = (time - self._t0).jd
 
             if self._tstart_list is None:
                 result = time < self._tstop_list[0]
