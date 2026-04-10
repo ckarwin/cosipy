@@ -318,7 +318,7 @@ class SpacecraftHistory:
 
         # Include the full bin, but prevent an index error
         start_idx = max(0, start_idx - 1)
-        start_idx = min(time.size, stop_idx + 1)
+        stop_idx = min(time.size, stop_idx + 1)
 
         return start_idx, stop_idx
 
