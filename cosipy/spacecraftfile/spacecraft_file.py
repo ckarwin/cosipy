@@ -71,6 +71,10 @@ class SpacecraftHistory:
         """
 
         self._obstime = obstime
+
+        if obstime.size < 2:
+            raise ValueError("SpacecraftHistory needs at least two timestamps.")
+
         self._t0 = self._obstime[0]
         self._obstime_dt_jd = self._get_dt_jd(obstime)
 
