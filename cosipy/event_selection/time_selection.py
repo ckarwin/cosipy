@@ -129,10 +129,13 @@ class TimeSelector(EventSelectorInterface):
                 result = time >= self._tstart_list[0]
 
             else:
-                indices = np.searchsorted(self._tstart_list, time, side='right') - 1
-                valid = (indices >= 0) & (indices < len(self._tstop_list))
+
                 result = np.zeros(len(time), dtype=bool)
-                result[valid] = time[valid] < self._tstop_list[indices[valid]]
+
+                lo_idx,hi_idx = np.searchsorted(time, [self._tstart_list, self._tstop_list], side='left')
+
+                for lo,hi in zip(lo_idx,hi_idx):
+                    result[lo:hi] = True
 
             # Stop further loading of event
             stop = early_stop and (self._tstop_list is not None and len(time) > 0) and time[-1] > self._tstop_list[-1]
