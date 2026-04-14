@@ -30,13 +30,30 @@ For backgrounds, we define `BackgroundInterface`. It is intentionally generic an
 Instrument Response Functions
 -----------------------------
 
-The (far-field) instrument response function (IRF) is responsible for providing:
-1. The effective area as a function of a photon energy and incoming direction (in spacecraft coordinates).
-2. The probability of obtaining a set of measurement when a photon is detected.
+The (far-field) instrument response function (IRF) is responsible for providing: (1) the effective area as a function of photon energy and incoming direction (in spacecraft coordinates), and (2) the probability of obtaining a given set of measurements when a photon is detected.
+These outputs are defined by ``FarFieldInstrumentResponseFunctionInterface`` via the methods ``effective_area_cm()`` and ``event_probability()``, respectively. For binned analyses, ``BinnedInstrumentResponseInterface`` provides ``differential_effective_area``, i.e., the product of ``effective_area_cm`` and ``event_probability`` integrated over each bin of a binned dataset. The interfaces definitions also allow for a near-field IRF, although it has not been developed yet.
 
-These required outputs are defined in FarFieldInstrumentResponseFunctionInterface by the methods `effective_area_cm()` and `event_probability()`, respectively. Similar, for the binned analysis, there is BinnedInstrumentResponseInterface, which provided `differential_effective_area`, that is, the product effective_area_cm*event_probability integrated on each bin of a binned dataset.
+For a Compton telescope such as COSI, typical measurements include the reconstructed energy, the Compton scattering angle, and the scattering direction. The definition of the measurement space is intentionally not part of the IRF interfaces; instead, it is delegated to the ``EventDataInterface`` (see below). Each IRF implementation must declare which ``EventDataInterface`` subclass it can handle, including any derived subclasses.
 
-For a Compton telescope, Typical measurements include the measured energyThe set of "measurement" is not defined by the IRF interfaces. This task is delegated to an `EventDataInterface` (see below).
+The IRF also needs to know how it will receive the photon properties being queried (e.g., true energy, direction, and polarization). This is handled by the ``PhotonInterface`` (see below).
+
+Data Interfaces
+---------------
+
+The data interfaces are used as a medium to specify measurements and counts independently of their origin or file format. There are two types: binned data and event (unbinned) data.
+
+The ``BinnedData`` interface is currently a thin wrapper around ``histpy``’s ``Histogram``, which contains both the axes for measured quantities and the observed counts (the histogram contents).
+
+There are multiple ``EventDataInterface`` derivatives, each specifying a measured value through a property. For example, ``EventDataWithEnergyInterface`` provides the property ``energy_keV``, and ``EventDataWithScatteringAngleInterface`` provides ``scattering_angle_rad``. These properties return iterables, with one entry per event. Their names are descriptive and include the unit. For convenience, properties such as ``energy`` (returning an ``astropy`` ``Quantity``) are also provided, but they are typically slower and should be avoided in performance-critical code. ``EventDataInterface`` types can be combined by creating classes that inherit from multiple interfaces, e.g. ``ComptonDataSpaceInSCFrameEventDataInterface``.
+
+In addition, all ``EventDataInterface`` implementations can return an iterable of ``EventInterface`` objects. ``EventInterface`` is similar to ``EventDataInterface``, except that it holds the values for a single event.
+
+Photon Interfaces
+-----------------
+
+``PhotonInterface`` and ``PhotonListInterface`` work in the same way as ``EventInterface`` and ``EventDataInterface``, respectively. However, their scope is more limited, since a photon’s direction, energy, and polarization are sufficient to fully specify its state. In the future, this may be extended to include the photon origin location to support near-field analyses.
+
+
 
 
 
