@@ -78,7 +78,8 @@ class SpacecraftHistory:
         self._t0 = self._obstime[0]
         self._obstime_dt_jd = self._get_dt_jd(obstime)
 
-        self.time_axis = Axis(self._obstime_dt_jd, copy = False, label= 'obstime_dt_jd')
+        self._time_axis = Axis(self._obstime_dt_jd, copy = False,
+                               label= 'obstime_dt_jd')
 
         if livetime is None:
             livetime = time_axis.widths.to(u.s)
@@ -107,7 +108,7 @@ class SpacecraftHistory:
 
     @property
     def intervals_duration(self):
-        return Quantity(self.time_axis.widths, u.day, copy = False)
+        return Quantity(self._time_axis.widths, u.day, copy = False)
 
     @property
     def intervals_tstart(self):
@@ -745,7 +746,7 @@ class SpacecraftHistory:
 
     def interp_weights(self, times: Time):
         times = self._get_dt_jd(times)
-        return self.time_axis.interp_weights_edges(times)
+        return self._time_axis.interp_weights_edges(times)
 
     def interp(self, times: Time) -> 'SpacecraftHistory':
 
