@@ -53,6 +53,10 @@ Photon Interfaces
 
 ``PhotonInterface`` and ``PhotonListInterface`` work in the same way as ``EventInterface`` and ``EventDataInterface``, respectively. However, their scope is more limited, since a photon’s direction, energy, and polarization are sufficient to fully specify its state. In the future, this may be extended to include the photon origin location to support near-field analyses.
 
+Event selection
+---------------
+
+The ``EventSelectionInterface`` defines a ``select()`` method, which takes either an ``EventDataInterface`` or an ``EventInterface`` object and returns True or False to indicate whether it should be selected. Implementations should specify which ``EventInterface`` type they support; all subclasses of that type are automatically supported. For example, ``TimeSelector`` supports ``TimetagEventInterface`` and therefore also any derived interface such as ``TimeTagEmCDSEventInSCFrameInterface``.
 
 
 
