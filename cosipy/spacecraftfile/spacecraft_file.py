@@ -78,13 +78,12 @@ class SpacecraftHistory:
         self._t0 = self._obstime[0]
         self._obstime_dt_jd = self._get_dt_jd(obstime)
 
-        time_axis = Axis(self._obstime_dt_jd, copy = False, label= 'obstime_dt_jd')
+        self.time_axis = Axis(self._obstime_dt_jd, copy = False, label= 'obstime_dt_jd')
 
         if livetime is None:
             livetime = time_axis.widths.to(u.s)
 
-        self._livetime_hist = Histogram(time_axis, livetime,
-                                        copy_contents = False)
+        self._livetime = livetime
 
         if not (location.shape == () or location.shape == obstime.shape):
             raise ValueError(f"'location' must be a scalar or have the same length as the timestamps ({obstime.shape}), but it has shape ({location.shape})")
@@ -104,11 +103,11 @@ class SpacecraftHistory:
 
     @property
     def nintervals(self):
-        return self._livetime_hist.nbins
+        return len(self._livetime)
 
     @property
     def intervals_duration(self):
-        return Quantity(self._livetime_hist.axis.widths, u.day, copy = False)
+        return Quantity(self.time_axis.widths, u.day, copy = False)
 
     @property
     def intervals_tstart(self):
@@ -136,7 +135,7 @@ class SpacecraftHistory:
 
     @property
     def livetime(self):
-        return self._livetime_hist.contents
+        return self._livetime
 
     @property
     def attitude(self):
@@ -705,8 +704,8 @@ class SpacecraftHistory:
                                                self._gcrs[points[1]])
 
     def _cumulative_livetime(self, points, weights) -> u.Quantity:
-        cum_livetime_discrete = np.append(0 * self._livetime_hist.unit,
-                                          np.cumsum(self.livetime))
+        cum_livetime_discrete = np.append(0 * self._livetime.unit,
+                                          np.cumsum(self._livetime))
 
         up_to_tstart = cum_livetime_discrete[points[0]]
 
@@ -746,7 +745,7 @@ class SpacecraftHistory:
 
     def interp_weights(self, times: Time):
         times = self._get_dt_jd(times)
-        return self._livetime_hist.axis.interp_weights_edges(times)
+        return self.time_axis.interp_weights_edges(times)
 
     def interp(self, times: Time) -> 'SpacecraftHistory':
 
@@ -1087,7 +1086,8 @@ class SpacecraftHistory:
             # zero out weights of time bins corresponding to occluded
             # pointings.  Assume occlusion at start of bin holds for
             # entire bin.
-            return np.where(is_occluded[:-1], 0*livetime.unit, livetime)
+            lt = np.where(is_occluded[:-1], 0, livetime.value)
+            return Quantity(lt, unit=livetime.unit, copy=False)
         else:
             return livetime
 
