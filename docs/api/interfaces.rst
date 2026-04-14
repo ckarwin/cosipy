@@ -9,6 +9,22 @@ This modularity is achieved by defining protocols for the interfaces between com
 
 Below we provide an overview of the available interfaces (used interchangeably with “protocols”) and how to use them. We start from the top-most level (the likelihood) and describe all other components needed to compute it. The best place to see practical examples in action is the `Crab spectral fit tutorials  <https://github.com/cositools/cosipy/tree/develop/docs/tutorials/spectral_fits/continuum_fit/crab>`_ (binned and unbinned). Note, however, that not every part of cosipy fully uses these protocols yet; some areas still refer to specific implementations rather than a generic interface.
 
+
+Here's a practical cheat sheet if you want to add/try a new:
+
+* Instrument response function (IRF):
+    - Interface: ``InstrumentResponseFunctionInterface``
+    - Example: ``UnpolarizedDC3InterpolatedFarFieldInstrumentResponseFunction``
+* IRF-source convolution:
+    - Interface: ``ThreeMLSourceResponseInterface``
+    - Examples: ``UnbinnedThreeMLPointSourceResponseTrapz``, ``BinnedThreeMLPointSourceResponse``
+* Background model:
+    - Interface: ``BackgroundInterface``
+    - Example: ``FreeNormBinnedBackground``, ``FreeNormBackgroundInterpolatedDensityTimeTagEmCDS``
+* Event selection:
+    - Interface: ``EventSelectorInterface``
+    - Example: ``TimeSelector``
+
 Likelihood functions
 --------------------
 
