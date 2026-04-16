@@ -1,0 +1,23 @@
+author: Hiroki Yoneda 
+date: 2024-07-06
+model_definition:
+  class: "AllSkyImage"
+  property:
+    coordinate: "galactic"
+    nside: 1 
+    scheme: "ring"
+    energy_edges: # shoud be the same as the response matrix
+      value: [100., 158.489, 251.189, 398.107, 630.957, 1000., 1584.89, 2511.89, 3981.07, 6309.57, 10000.]
+      unit: "keV"
+    unit: "cm-2 s-1 sr-1" # do not change it as for now
+  initialization:
+    algorithm: "flat" # more methods, e.g., simple-backprojection, user-defined, would be implemented.
+    parameter:
+      value: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0] #the number of these values should be the same as "the number of energy_edges - 1".
+      unit: "cm-2 s-1 sr-1"  # do not change it as for now
+deconvolution:
+  algorithm: "RLbasic"
+  parameter:
+    iteration_max: 2 
+    background_normalization_optimization: 
+      activate: True

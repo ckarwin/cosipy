@@ -4,6 +4,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import sys
 import pandas as pd
+import logging
+logger = logging.getLogger(__name__)
 
 try:
     # Load MEGAlib into ROOT
@@ -21,7 +23,7 @@ class ReadTraTest(UnBinnedData):
 
     """Old method for reading tra file, used for unit testing."""
     
-    def read_tra_old(self,make_plots=True):
+    def read_tra_old(self, output_name, make_plots=True):
         
         """Reads in MEGAlib .tra (or .tra.gz) file.
        
@@ -32,6 +34,8 @@ class ReadTraTest(UnBinnedData):
 
         Parameters
         ----------
+        output_name : str
+            Prefix of output file.
         make_plots : bool, optional
             Option to make binning plot.
 
@@ -50,7 +54,8 @@ class ReadTraTest(UnBinnedData):
                         'Psi local':psi_loc,\
                         'Distance':dist,\
                         'Chi galactic':chi_gal,\
-                        'Psi galactic':psi_gal}
+                        'Psi galactic':psi_gal,\
+                        'Compton Seq':CO_seq}
         
         Note
         ----
@@ -61,15 +66,14 @@ class ReadTraTest(UnBinnedData):
         # tra file to use:
         tra_file = self.data_file
 
-        # Make print statement:
-        print()
-        print("Read tra test...")
-        print()
+        # Log message:
+        logger.info("Read tra test...")
+        
          
         # Check if file exists:
         Reader = M.MFileEventsTra()
         if Reader.Open(M.MString(tra_file)) == False:
-            print("Unable to open file %s. Aborting!" %self.data_file)
+            logger.error("Unable to open file %s. Aborting!" %self.data_file)
             sys.exit()
 
         # Initialise empty lists:
@@ -100,7 +104,10 @@ class ReadTraTest(UnBinnedData):
         chi_gal = []
         # Measured gal angle psi (lat direction)
         psi_gal = [] 
+        # Compton seq
+        CO_seq = []
 
+        
         # Browse through tra file, select events, and sort into corresponding list:
         # Note: The Reader class from MEGAlib knows where an event starts and ends and
         # returns the Event object which includes all information of an event.
@@ -140,12 +147,17 @@ class ReadTraTest(UnBinnedData):
             chi_gal.append((Event.GetGalacticPointingRotationMatrix()*Event.Dg()).Phi())
             # Gal longitude angle corresponding to chi:
             psi_gal.append((Event.GetGalacticPointingRotationMatrix()*Event.Dg()).Theta())
-                
+            # Compton sequence (nb of interaction) 
+            CO_seq.append(Event.SequenceLength())
+
+            
         # Initialize arrays:
         erg = np.array(erg)
         tt = np.array(tt)
         et = np.array(et)
 
+        CO_seq = np.array(CO_seq)
+        
         latX = np.array(latX)
         lonX = np.array(lonX)
         # Change longitudes to from 0..360 deg to -180..180 deg
@@ -198,11 +210,12 @@ class ReadTraTest(UnBinnedData):
                         'Psi local':self.psi_loc_old,
                         'Distance':dist,
                         'Chi galactic':self.chi_gal_old,
-                        'Psi galactic':self.psi_gal_old} 
+                        'Psi galactic':self.psi_gal_old,
+                       'Compton Seq':CO_seq} 
         self.cosi_dataset = cosi_dataset
 
         # Write unbinned data to file (either fits or hdf5):
-        self.write_unbinned_output() 
+        self.write_unbinned_output(output_name) 
         
         return 
 

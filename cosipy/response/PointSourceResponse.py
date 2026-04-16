@@ -1,13 +1,25 @@
-from histpy import Histogram, Axes, Axis
-
-import astropy.units as u
-
+from histpy import Histogram
+from astropy.coordinates import SkyCoord
 from astropy.units import Quantity
 
-from scipy import integrate
+from cosipy.polarization.polarization_axis import PolarizationAxis
+from cosipy.threeml.util import to_linear_polarization
+from mhealpy import HealpixMap
+from cosipy.interfaces import BinnedInstrumentResponseInterface, BinnedDataInterface
+from histpy import Histogram, Axis, Axes 
 
-from threeML import DiracDelta, Constant, Line, Quadratic, Cubic, Quartic, StepFunction, StepFunctionUpper, Cosine_Prior, Uniform_prior, PhAbs, Gaussian
+import numpy as np
+import astropy.units as u
+from scoords import Attitude
 
+from .functions import get_integrated_spectral_model
+
+import logging
+
+from cosipy.spacecraftfile import SpacecraftAttitudeMap
+from ..data_io import EmCDSBinnedData
+
+logger = logging.getLogger(__name__)
 
 class PointSourceResponse(Histogram):
     """
@@ -30,7 +42,7 @@ class PointSourceResponse(Histogram):
         Physical units, if not specified as part of ``contents``. Units of ``area*time``
         are expected.
     """
-    
+
     @property
     def photon_energy_axis(self):
         """
@@ -40,62 +52,158 @@ class PointSourceResponse(Histogram):
         -------
         :py:class:`histpy.Axes`
         """
-        
+
         return self.axes['Ei']
-       
-    def get_expectation(self, spectrum):
+
+    @property
+    def measurement_axes(self):
+        return self.axes['Em', 'Phi', 'PsiChi']
+
+    def get_expectation(self, spectrum, polarization=None, flux=None):
         """
-        Convolve the response with a spectral hypothesis to obtain the expected
+        Convolve the response with a spectral (and optionally, polarization) hypothesis to obtain the expected
         excess counts from the source.
 
         Parameters
         ----------
         spectrum : :py:class:`threeML.Model`
             Spectral hypothesis.
+        polarization : 'astromodels.core.polarization.LinearPolarization', optional
+            Polarization angle and degree. The angle is assumed to have same convention as point source response.
+        flux : 1D Histogram, optional
+            Pre-computed integrated flux of spectrum for each bin on Ei axis
 
         Returns
         -------
         :py:class:`histpy.Histogram`
              Histogram with the expected counts on each analysis bin
         """
-        
-        eaxis = self.photon_energy_axis
-        
-        spectrum_unit = None
 
-        for item in spectrum.parameters:
-            if getattr(spectrum, item).is_normalization == True:
-                spectrum_unit = getattr(spectrum, item).unit
-                break
-                
-        if spectrum_unit == None:
-            if isinstance(spectrum, Constant):
-                spectrum_unit = spectrum.k.unit
-            elif isinstance(spectrum, Line) or isinstance(spectrum, Quadratic) or isinstance(spectrum, Cubic) or isinstance(spectrum, Quartic):
-                spectrum_unit = spectrum.a.unit
-            elif isinstance(spectrum, StepFunction) or isinstance(spectrum, StepFunctionUpper) or isinstance(spectrum, Cosine_Prior) or isinstance(spectrum, Uniform_prior) or isinstance(spectrum, DiracDelta): 
-                spectrum_unit = spectrum.value.unit
-            elif isinstance(spectrum, PhAbs):
-                spectrum_unit = u.dimensionless_unscaled
-            elif isinstance(spectrum, Gaussian):
-                spectrum_unit = spectrum.F.unit / spectrum.sigma.unit 
-            else:
-                try:
-                    spectrum_unit = spectrum.K.unit
-                except:
-                    raise RuntimeError("Spectrum not yet supported because units of spectrum are unknown.")
-                    
-        if isinstance(spectrum, DiracDelta):
-            flux = Quantity([spectrum.value.value * spectrum_unit * lo_lim.unit if spectrum.zero_point.value >= lo_lim/lo_lim.unit and spectrum.zero_point.value <= hi_lim/hi_lim.unit else 0 * spectrum_unit * lo_lim.unit
-                             for lo_lim,hi_lim
-                             in zip(eaxis.lower_bounds, eaxis.upper_bounds)])
+        polarization = to_linear_polarization(polarization)
+
+        if 'Pol' in self.axes.labels:
+
+            pol_axis = self.axes['Pol']
+
+            polarization_angle = polarization.angle.value
+            polarization_level = polarization.degree.value / 100.
+
+            if polarization_angle == 180.:
+                polarization_angle = 0.
+
+            # unpolarized weights
+            weights = np.full(pol_axis.nbins, (1. - polarization_level) / pol_axis.nbins)
+
+            # add polarized weights
+            if polarization_level != 0:
+                polarization_bin_index = pol_axis.find_bin(polarization_angle * u.deg)
+                weights[polarization_bin_index] += polarization_level
+
+            weights *= self.axes['Pol'].nbins
+
+            contents = np.tensordot(weights, self.contents, axes=(0, self.axes.label_to_index('Pol')))
+
         else:
-            flux = Quantity([integrate.quad(spectrum, lo_lim/lo_lim.unit, hi_lim/hi_lim.unit)[0] * spectrum_unit * lo_lim.unit
-                             for lo_lim,hi_lim
-                             in zip(eaxis.lower_bounds, eaxis.upper_bounds)])
-        
-        flux = self.expand_dims(flux.value, 'Ei') * flux.unit
 
-        expectation = self * flux
-        
-        return expectation
+            if polarization.degree.value != 0:
+                raise RuntimeError(
+                    "Response must have polarization angle axis to include polarization in point source response")
+
+            contents = self.contents
+
+
+        if flux is None:
+            energy_axis = self.photon_energy_axis
+            flux = get_integrated_spectral_model(spectrum, energy_axis)
+
+        expectation = np.tensordot(contents, flux.contents, axes=(0, 0))
+
+        # if self is sparse, expectation will be a SparseArray with
+        # no units, so set the result's unit explicitly
+        hist = Histogram(self.measurement_axes, contents = expectation,
+                         unit = self.unit * flux.unit,
+                         copy_contents = False)
+
+        if not hist.unit == u.dimensionless_unscaled:
+            raise RuntimeError(f"Expectation should be dimensionless, but has units of {(hist.unit)}.")
+
+        return hist
+
+    @classmethod
+    def from_dwell_time_map(cls,
+                            data:BinnedDataInterface,
+                            response: BinnedInstrumentResponseInterface,
+                            exposure_map: HealpixMap,
+                            energy_axis: Axis,
+                            polarization_axis: PolarizationAxis = None
+                            ):
+
+        axes = [energy_axis]
+
+        polarization_centers = None
+        if polarization_axis is not None:
+            axes += [polarization_axis]
+            polarization_centers = polarization_axis.centers
+
+        axes += list(data.axes)
+
+        psr = PointSourceResponse(axes, unit=u.cm * u.cm * u.s)
+
+        for p in range(exposure_map.npix):
+
+            coord = exposure_map.pix2skycoord(p)
+
+            if exposure_map[p] != 0:
+                psr += response.differential_effective_area(coord, energy_axis.centers, polarization_centers) * exposure_map[p]
+
+        return psr
+
+    @classmethod
+    def from_scatt_map(cls,
+                        coord: SkyCoord,
+                        data:BinnedDataInterface,
+                        response: BinnedInstrumentResponseInterface,
+                        scatt_map: SpacecraftAttitudeMap,
+                        energy_axis: Axis,
+                        polarization_axis: PolarizationAxis = None
+                        ):
+        """
+
+        Parameters
+        ----------
+        measured_axes
+        response
+        scatt_map
+        energy_axis
+        polarization_axis
+
+        Returns
+        -------
+
+        """
+
+        if not isinstance(data, EmCDSBinnedData):
+            raise TypeError(f"Wrong data type '{type(data)}', expected {EmCDSBinnedData}.")
+
+        axes = [energy_axis]
+
+        if polarization_axis is not None:
+            axes += [polarization_axis]
+
+        axes += list(data.axes)
+        axes = Axes(axes)
+
+        psr = Quantity(np.zeros(shape=axes.shape), unit = u.cm * u.cm * u.s)
+
+        for att, exposure in zip(scatt_map.attitudes, scatt_map.weights):
+
+            response.differential_effective_area(coord,
+                                                 energy_axis.centers,
+                                                 None if polarization_axis is None else polarization_axis,
+                                                 attitude = att,
+                                                 weight=exposure,
+                                                 out=psr,
+                                                 add_inplace=True)
+
+        return PointSourceResponse(axes, contents = psr)
+

@@ -130,3 +130,10 @@ dmypy.json
 
 # Tempoerary files
 *~
+
+# OS
+.DS_store
+
+# IDEs
+# PyCharm / IntelliJ
+/.idea

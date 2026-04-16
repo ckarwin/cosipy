@@ -20,10 +20,6 @@ project = 'cosipy'
 copyright = '2022, COSI Team'
 author = 'COSI Team'
 
-# The full version, including alpha/beta/rc tags
-with open('../cosipy/_version.py') as f:
-    release = f.readline()
-
 # -- General configuration ---------------------------------------------------
 
 # Add any Sphinx extension module names here, as strings. They can be
@@ -67,7 +63,10 @@ autodoc_mock_imports = ["histpy",
                         'tqdm',
                         'scipy',
                         'psutil',
-                        'awscli']
+                        'awscli',
+                        'yayc',
+                        'iminuit'
+                        ]
 
 # There seems to be a conflict between unittest.mock (used by sphinx) and metaclasses
 # The cosipy.threeml.custom_functions.Band_Eflux includes a metaclass from
