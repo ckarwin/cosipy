@@ -1,5 +1,5 @@
 import copy
-from typing import Dict
+from typing import Collection, Dict, Optional
 
 from docutils.io import InputError
 from numba.typed.dictobject import DictModel
@@ -54,7 +54,29 @@ class ThreeMLModelFoldingCacheSourceResponsesMixin:
         # removed from the model.
         new_source_responses = {}
 
-        for name, source in self._model.sources.items():
+        if self._source_names is None:
+             selected_sources = self._model.sources.items()
+
+        else:
+            missing_sources = [
+                name
+                for name in self._source_names
+                if name not in self._model.sources
+            ]
+
+            if missing_sources:
+                raise ValueError(
+                    "The following requested COSI sources are not present "
+                    f"in the astromodels model: {missing_sources}"
+                )
+
+            selected_sources = (
+                (name, self._model.sources[name])
+                for name in self._source_names
+            )
+
+
+        for name, source in selected_sources:
 
             if name in self._source_responses:
                 # Use cache
@@ -95,7 +117,8 @@ class BinnedThreeMLModelFolding(BinnedThreeMLModelFoldingInterface, ThreeMLModel
     def __init__(self,
                  data: BinnedDataInterface,
                  point_source_response:BinnedThreeMLSourceResponseInterface = None,
-                 extended_source_response: BinnedThreeMLSourceResponseInterface = None):
+                 extended_source_response: BinnedThreeMLSourceResponseInterface = None,
+                 source_names: Optional[Collection[str]] = None):
         """
 
         Parameters
@@ -110,6 +133,17 @@ class BinnedThreeMLModelFolding(BinnedThreeMLModelFoldingInterface, ThreeMLModel
 
         # Interface inputs
         self._model = None
+
+        # If None, preserve the existing behavior and use every source.
+        self._source_names = (
+            None if source_names is None else tuple(source_names)
+            )
+
+        if (
+            self._source_names is not None
+            and len(self._source_names) != len(set(self._source_names))
+        ):
+            raise ValueError("source_names contains duplicate source names")
 
         # Implementation inputs
         self._psr = point_source_response
